@@ -102,9 +102,10 @@ def compute_NG_update(player, inv_outer_prod_jac, lr):
         param -= lr * param_grad
         idx += param_length
 
-def train(num_steps=1000, base_lr=1e-6):
+def train_NG(num_steps=1000, base_lr=1e-5):
     """
-    Train the simple rock-paper-scissors agents.
+    Train the simple rock-paper-scissors agents using the natural gradient
+    algorithm.
     """
     device = torch.device("cuda:0" if torch.cuda.is_available() else "cpu")
 
@@ -153,8 +154,125 @@ def train(num_steps=1000, base_lr=1e-6):
         
         wandb.log({
             "loss": p1_loss.item(),
-            # "": ,
-            # "": ,
+        })
+    
+    return p1_pred, p2_pred, p1_loss.item()
+
+
+def compute_surrogate_loss(
+        player_current_pred, # w
+        player_old_pred,     # w_t
+        player_loss_grad,    # grad(L(w_t))
+        old_loss,            # L(w_t)
+        lr,                  # const
+    ):
+    """
+    The surrogate loss function must have the same gradient as the loss
+    function which is then optimised a number of times more than a standard
+    loss function.
+
+    Surrogate = L(w_t) + <grad(L(w_t)), w - w_t> + const * norm(w - w_t)^2
+    grad(surrogate) = grad(L(w_t))grad(w) + const*2*(w - w_t) = 0
+        w_{t+1} = w_t - 1/(const*2) * grad(L(w_t))grad(w)
+    
+    Where grad(L(w_t))grad(w) = grad(L(w(x_t))) w.r.t. x, which is our
+    paramaterisation. Here, w(x_t) is a neural network output that we use in a
+    smooth function (loss is at least smooth, if not also convex).
+    
+    Notice, w_{t+1} is an update to the output of a neural network. How do we
+    translate this update from the output space to the parameter space?
+        - You can simply do a gradient step on this surrogate loss function
+          gradient! x = x_t - const*grad(surrogate). So, just use any standard
+          optimiser.
+    """
+    # Don't want gradients on old models.
+    player_old_pred = player_old_pred.detach()
+    surrogate_loss = old_loss.detach()
+
+    surrogate_loss += torch.sum(
+        player_loss_grad @ (
+            player_current_pred - player_old_pred).T
+    ) # inner-product
+    surrogate_loss += torch.sum(
+        (lr / 2) * torch.linalg.vector_norm(
+        player_current_pred - player_old_pred) ** 2
+    )
+    return surrogate_loss
+
+
+def train_target_based_surrogate(num_steps=1000, base_lr=1e-2):
+    """
+    Train the simple rock-paper-scissors agents using the target-based
+    surrogates algorithm.
+    """
+    device = torch.device("cuda:0" if torch.cuda.is_available() else "cpu")
+
+    env = RPSEnv(lambda_reg=1.0, device=device)
+    
+    player_1 = MLPRPSPlayer(input_size=3, hidden_size=128, output_size=3).to(device)
+    player_2 = MLPRPSPlayer(input_size=3, hidden_size=128, output_size=3).to(device)
+
+    p1_opt = torch.optim.SGD(player_1.parameters(), lr=base_lr)
+    p2_opt = torch.optim.SGD(player_2.parameters(), lr=base_lr)
+    
+    player_1.train()
+    player_2.train()
+    
+    input = torch.tensor([[0.0, 1.0, 0.0]], device=device)
+    
+    for step in (pbar := tqdm(range(num_steps), unit="Step")):
+        # Schedule a linearly decreasing learning rate
+        lr = base_lr # * (num_steps - step) / num_steps
+
+        # Get the predictions for each player:
+        p1_pred = player_1(input)
+        p2_pred = player_2(input)
+
+        # Compute the game loss for each player:
+        p1_loss, p2_loss = env.hcc_objective(
+            p1_policy=p1_pred, p2_policy=p2_pred)
+
+        # Get the loss gradients for each player in terms of the network output
+        p1_loss_grad = torch.autograd.grad(outputs=p1_loss, inputs=p1_pred, create_graph=True, allow_unused=True)[0].detach()
+        p2_loss_grad = torch.autograd.grad(outputs=p2_loss, inputs=p2_pred, create_graph=True, allow_unused=True)[0].detach()
+        
+        # Now, compute the updates for player 1. Compute the surrogate loss,
+        # then, compute the gradient and update model parameters via this loss.
+        # breakpoint()
+        for _ in range(10):
+            p1_opt.zero_grad()
+            current_pred = player_1(input)
+            p1_surrogate_loss = compute_surrogate_loss(
+                player_current_pred=current_pred,
+                player_old_pred=p1_pred,
+                player_loss_grad=p1_loss_grad,
+                old_loss=p1_loss,
+                lr=lr,
+            )
+            p1_surrogate_loss.backward()
+            p1_opt.step()
+
+        # Now, compute the updates for player 2
+        for _ in range(10):
+            p2_opt.zero_grad()
+            current_pred = player_2(input)
+            p2_surrogate_loss = compute_surrogate_loss(
+                player_current_pred=current_pred,
+                player_old_pred=p2_pred,
+                player_loss_grad=p2_loss_grad,
+                old_loss=p2_loss,
+                lr=lr,
+            )
+            p2_surrogate_loss.backward()
+            p2_opt.step()
+        
+        if(step % 10 == 0):
+            tqdm.write(f"loss = {p1_loss.item()}")
+            tqdm.write(f"p1 policy = {p1_pred[0,0].item() :.2f}, {p1_pred[0,1].item() :.2f}, {p1_pred[0,2].item() :.2f}")
+            tqdm.write(f"p2 policy = {p2_pred[0,0].item() :.2f}, {p2_pred[0,1].item() :.2f}, {p2_pred[0,2].item() :.2f}")
+        
+        wandb.log({
+            "loss": p1_loss.item(),
         })
     
     return p1_pred, p2_pred, p1_loss.item()
@@ -166,7 +284,8 @@ if __name__ == "__main__":
         tags=["NG_vs_TBS"],
         mode="online",
     )
-    p1, p2, loss = train()
+    p1, p2, loss = train_NG(base_lr=1e-2)
+    # p1, p2, loss = train_target_based_surrogate(base_lr=1e-2)
 
 
 

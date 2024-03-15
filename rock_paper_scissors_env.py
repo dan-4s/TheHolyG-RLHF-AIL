@@ -20,7 +20,7 @@ class RPSEnv():
         # We have the policies of each player, compute the loss
         reward = torch.sum(p1_policy @ self.reward_mat @ p2_policy.T)
         loss = reward + (self.lambda_reg / 2) * (
-            torch.linalg.vector_norm(p1_policy - 1/3)**2 + 
+            torch.linalg.vector_norm(p1_policy - 1/3)**2 - 
             torch.linalg.vector_norm(p2_policy - 1/3)**2
         )
         return loss
