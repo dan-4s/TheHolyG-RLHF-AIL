@@ -102,7 +102,7 @@ def compute_NG_update(player, inv_outer_prod_jac, lr):
         param -= lr * param_grad
         idx += param_length
 
-def train_NG(num_steps=1000, base_lr=1e-5):
+def train_NG(num_steps=1000, base_lr=1e-5, lr_schedule=True):
     """
     Train the simple rock-paper-scissors agents using the natural gradient
     algorithm.
@@ -121,10 +121,11 @@ def train_NG(num_steps=1000, base_lr=1e-5):
     player_2.train()
     
     input = torch.tensor([[0.0, 1.0, 0.0]], device=device)
-    
+    lr = base_lr
     for step in (pbar := tqdm(range(num_steps), unit="Step")):
         # Schedule a linearly decreasing learning rate
-        lr = base_lr * (num_steps - step) / num_steps
+        if(lr_schedule):
+            lr = base_lr * (num_steps - step) / num_steps
 
         # Get the predictions for each player:
         p1_pred = player_1(input)
@@ -200,7 +201,7 @@ def compute_surrogate_loss(
     return surrogate_loss
 
 
-def train_target_based_surrogate(num_steps=1000, base_lr=1e-2):
+def train_target_based_surrogate(num_steps=1000, base_lr=1e-2, lr_schedule=True):
     """
     Train the simple rock-paper-scissors agents using the target-based
     surrogates algorithm.
@@ -219,10 +220,11 @@ def train_target_based_surrogate(num_steps=1000, base_lr=1e-2):
     player_2.train()
     
     input = torch.tensor([[0.0, 1.0, 0.0]], device=device)
-    
+    lr = base_lr
     for step in (pbar := tqdm(range(num_steps), unit="Step")):
         # Schedule a linearly decreasing learning rate
-        lr = base_lr # * (num_steps - step) / num_steps
+        if(lr_schedule):
+            lr = base_lr * (num_steps - step) / num_steps
 
         # Get the predictions for each player:
         p1_pred = player_1(input)
@@ -276,17 +278,6 @@ def train_target_based_surrogate(num_steps=1000, base_lr=1e-2):
         })
     
     return p1_pred, p2_pred, p1_loss.item()
-
-
-if __name__ == "__main__":
-    wandb.init(
-        project="HCC_NG_vs_TBS",
-        tags=["NG_vs_TBS"],
-        mode="online",
-    )
-    p1, p2, loss = train_NG(base_lr=1e-2)
-    # p1, p2, loss = train_target_based_surrogate(base_lr=1e-2)
-
 
 
 
