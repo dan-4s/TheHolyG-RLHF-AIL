@@ -6,15 +6,19 @@ We use hydra to manage configurations and WandB to display our metrics during tr
 
 ### Basic commands
 To run natural gradient-based training on rock-paper-scissors:
+
 `python train.py --config-name=ng_rps.yaml`
 
 To run target-based surrogate training on rock-paper-scissors:
+
 `python train.py --config-name=tbs_rps.yaml`
 
 ### Naming WandB runs
 The following will allow for wandb run names to be specific directly from the command line. This saves you from manually having to do so in the web application.
+
 `python train.py --config-name=tbs_rps.yaml wandb.run_name="TBS lr\=1e-6"`
 
 ### Changing learning hyperparameters
 To change any hyperparameter on the command line you can simply add `<high-level name>.<hyperparam>=<value>`. For example, to set the learning rate:
+
 `python train.py --config-name=tbs_rps.yaml training.base_lr=1e-6`
