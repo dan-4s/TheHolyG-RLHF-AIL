@@ -1,14 +1,27 @@
+env:
+    _target_: src.envs.rock_paper_scissors_env.RPSEnv
+    lambda_reg: 1.0
 
+player_1:
+    _target_: src.agent_networks.rock_paper_scissors_agents.MLPRPSPlayer
+    input_size: 3
+    hidden_size: 128
+    output_size: 3
 
+player_2:
+    _target_: src.agent_networks.rock_paper_scissors_agents.MLPRPSPlayer
+    input_size: 3
+    hidden_size: 128
+    output_size: 3
 
 algo:
+    toy: True
     algo: "tbs"
 
 training_hyperparams:
     num_steps: 1000
     base_lr: 1e-2
     lr_schedule: True
-
 
 # Wandb settings
 wandb:

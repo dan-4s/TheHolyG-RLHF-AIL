@@ -1,48 +1,16 @@
 """
-Proof of concept for rock-paper-scissors toy game.
+Natural Gradient and Target-based surrogate optimisation of toy games.
 
-TODO: Add target-based surrogate optimisation and methods to differentiate between them.
-TODO: Add hydra for configuration selection and easy switching between methods.
 TODO: Add random seed setting to get repeatable runs!
 """
-
 
 import torch
 from torch.nn import Module
 from torch.nn import Parameter
 from functorch import make_functional, jacrev, vmap
-from rock_paper_scissors_env import RPSEnv
 from tqdm import tqdm
 import wandb
 
-
-class TabularRPSPlayer(Module):
-    """
-    This architecture is too simple, it does not learn anything!
-    """
-    def __init__(self, device):
-        super().__init__()
-        self.device = device
-        self.super_complex_neural_network = Parameter(
-            torch.randn((3), device=device)
-        )
-        self.softmax = torch.nn.Softmax(dim=0)
-    
-    def forward(self, input):
-        return self.softmax(self.super_complex_neural_network * input)
-
-class MLPRPSPlayer(Module):
-    def __init__(self, input_size, hidden_size, output_size):
-        super(MLPRPSPlayer, self).__init__()
-        self.network = torch.nn.Sequential(
-            torch.nn.Linear(input_size, hidden_size),
-            torch.nn.GELU(),
-            torch.nn.Linear(hidden_size, output_size),
-            torch.nn.Softmax(dim=-1)
-        )
-
-    def forward(self, x):
-        return self.network(x)
 
 def compute_jacobian_wrt_params(player, input):
     """
@@ -102,18 +70,18 @@ def compute_NG_update(player, inv_outer_prod_jac, lr):
         param -= lr * param_grad
         idx += param_length
 
-def train_NG(num_steps=1000, base_lr=1e-5, lr_schedule=True):
+def train_NG(
+        env,
+        player_1: Module,
+        player_2: Module,
+        device: torch.DeviceObjType,
+        num_steps=1000,
+        base_lr=1e-2,
+        lr_schedule=True,
+    ):
     """
-    Train the simple rock-paper-scissors agents using the natural gradient
-    algorithm.
+    Train the agents using the natural gradient algorithm.
     """
-    device = torch.device("cuda:0" if torch.cuda.is_available() else "cpu")
-
-    env = RPSEnv(lambda_reg=1.0, device=device)
-    
-    player_1 = MLPRPSPlayer(input_size=3, hidden_size=128, output_size=3).to(device)
-    player_2 = MLPRPSPlayer(input_size=3, hidden_size=128, output_size=3).to(device)
-
     p1_opt = torch.optim.SGD(player_1.parameters(), lr=base_lr)
     p2_opt = torch.optim.SGD(player_2.parameters(), lr=base_lr)
     
@@ -201,18 +169,18 @@ def compute_surrogate_loss(
     return surrogate_loss
 
 
-def train_target_based_surrogate(num_steps=1000, base_lr=1e-2, lr_schedule=True):
+def train_target_based_surrogate(
+        env,
+        player_1: Module,
+        player_2: Module,
+        device: torch.DeviceObjType,
+        num_steps=1000,
+        base_lr=1e-2,
+        lr_schedule=True,
+    ):
     """
-    Train the simple rock-paper-scissors agents using the target-based
-    surrogates algorithm.
+    Train the agents using the target-based surrogates algorithm.
     """
-    device = torch.device("cuda:0" if torch.cuda.is_available() else "cpu")
-
-    env = RPSEnv(lambda_reg=1.0, device=device)
-    
-    player_1 = MLPRPSPlayer(input_size=3, hidden_size=128, output_size=3).to(device)
-    player_2 = MLPRPSPlayer(input_size=3, hidden_size=128, output_size=3).to(device)
-
     p1_opt = torch.optim.SGD(player_1.parameters(), lr=base_lr)
     p2_opt = torch.optim.SGD(player_2.parameters(), lr=base_lr)
     
