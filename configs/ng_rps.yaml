@@ -29,4 +29,4 @@ wandb:
     project: HCC_NG_vs_TBS
     tags: [NG_vs_TBS]
     mode: online # Whether to use wandb [disabled, online]
-    run_name: None
+    run_name: null

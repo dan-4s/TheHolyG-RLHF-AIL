@@ -9,6 +9,7 @@ import torch
 import wandb
 from omegaconf import DictConfig
 from src.opt_algos.toy_game_optimisation import train_NG, train_target_based_surrogate
+from src.opt_algos.expert_sampling import get_expert_trajectories
 
 
 @hydra.main(version_base="1.3", config_path="configs", config_name="tbs_rps.yaml")
@@ -37,7 +38,7 @@ def main(cfg: DictConfig) -> None:
         discrete = cfg.env.discrete
         action_dim = cfg.env.action_dim
         state_dim = cfg.env.state_dim
-        env = gym.make(cfg.env._target_)
+        env = gym.make(cfg.env._target_, render_mode="rgb_array")
         env.reset()
         # Can add assert statements here to ensure that action_dim and
         # state_dim match what we have set.
@@ -65,6 +66,10 @@ def main(cfg: DictConfig) -> None:
             model_save_dir = os.path.join(checkpoints_dir, run_and_env)
         else:
             model_save_dir = os.path.join(checkpoints_dir, cfg.env._target_)
+        
+        # Create the directories if need be.
+        if(not os.path.exists(model_save_dir)):
+            os.makedirs(model_save_dir)
 
         # Policy we're training.
         policy_net = hydra.utils.instantiate(cfg.policy_net, state_dim, action_dim, discrete).to(device)
@@ -74,10 +79,17 @@ def main(cfg: DictConfig) -> None:
         discriminator = hydra.utils.instantiate(cfg.discriminator_net, state_dim, action_dim, discrete).to(device)
         
         # TODO: DEFINE train_GAIL()
+        get_expert_trajectories(
+            env=env,
+            expert=expert,
+            num_sa_pairs=2000,
+            horizon=2000,
+            device=torch.device("cuda:0"),
+            # render_gif=True, # TODO: uncomment this, just add config options for it.
+            # gif_path=experts_path,
+        )
 
         # Save the trained models
-        if(not os.path.exists(model_save_dir)):
-            os.makedirs(model_save_dir)
         torch.save(
             policy_net.state_dict(),
             os.path.join(model_save_dir, "policy.pt"),
