@@ -1,0 +1,52 @@
+env:
+    _target_: "CartPole-v1"
+    gym: True
+    discrete: True # Discrete action space
+    action_dim: 2 # From env.action_space.n
+    state_dim: 4 # From len(env.observation_space.high)
+
+expert_hyperparams:
+    num_iters: 200,
+    num_steps_per_iter: 2000,
+    horizon: None,
+    gamma: 0.99,
+    lambda: 0.99,
+    epsilon: 0.01,
+    max_kl: 0.01,
+    cg_damping: 0.1,
+    normalize_advantage: True
+
+training_hyperparams:
+    num_iters: 200,
+    num_steps_per_iter: 2000,
+    horizon: None,
+    lambda: 1e-3,
+    gae_gamma: 0.99,
+    gae_lambda: 0.99,
+    epsilon: 0.01,
+    max_kl: 0.01,
+    cg_damping: 0.1,
+    normalize_advantage: True
+
+algo:
+    toy: False
+    algo: "GAIL"
+
+expert_net:
+    _target_: src.agent_networks.gail_networks.Expert
+
+policy_net:
+    _target_: src.agent_networks.gail_networks.PolicyNetwork
+
+value_net:
+    _target_: src.agent_networks.gail_networks.ValueNetwork
+
+discriminator_net:
+    _target_: src.agent_networks.gail_networks.Discriminator
+
+# Wandb settings
+wandb:
+    project: HCC_NG_vs_TBS
+    tags: [NG_vs_TBS]
+    mode: online # Whether to use wandb [disabled, online]
+    run_name: None

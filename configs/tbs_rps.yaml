@@ -1,5 +1,6 @@
 env:
     _target_: src.envs.rock_paper_scissors_env.RPSEnv
+    gym: False
     lambda_reg: 1.0
 
 player_1:
@@ -19,7 +20,7 @@ algo:
     algo: "tbs"
 
 training_hyperparams:
-    num_steps: 1000
+    num_iters: 1000
     base_lr: 1e-2
     lr_schedule: True
 

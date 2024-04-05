@@ -1,6 +1,9 @@
 # Our ignores
+checkpoints/*
 outputs/*
 wandb/*
+*.out
+*.sh
 
 # Byte-compiled / optimized / DLL files
 __pycache__/

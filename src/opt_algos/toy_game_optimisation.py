@@ -75,7 +75,7 @@ def train_NG(
         player_1: Module,
         player_2: Module,
         device: torch.DeviceObjType,
-        num_steps=1000,
+        num_iters=1000,
         base_lr=1e-2,
         lr_schedule=True,
     ):
@@ -90,10 +90,10 @@ def train_NG(
     
     input = torch.tensor([[0.0, 1.0, 0.0]], device=device)
     lr = base_lr
-    for step in (pbar := tqdm(range(num_steps), unit="Step")):
+    for step in (pbar := tqdm(range(num_iters), unit="Step")):
         # Schedule a linearly decreasing learning rate
         if(lr_schedule):
-            lr = base_lr * (num_steps - step) / num_steps
+            lr = base_lr * (num_iters - step) / num_iters
 
         # Get the predictions for each player:
         p1_pred = player_1(input)
@@ -174,7 +174,7 @@ def train_target_based_surrogate(
         player_1: Module,
         player_2: Module,
         device: torch.DeviceObjType,
-        num_steps=1000,
+        num_iters=1000,
         base_lr=1e-2,
         lr_schedule=True,
     ):
@@ -189,10 +189,10 @@ def train_target_based_surrogate(
     
     input = torch.tensor([[0.0, 1.0, 0.0]], device=device)
     lr = base_lr
-    for step in (pbar := tqdm(range(num_steps), unit="Step")):
+    for step in (pbar := tqdm(range(num_iters), unit="Step")):
         # Schedule a linearly decreasing learning rate
         if(lr_schedule):
-            lr = base_lr * (num_steps - step) / num_steps
+            lr = base_lr * (num_iters - step) / num_iters
 
         # Get the predictions for each player:
         p1_pred = player_1(input)
