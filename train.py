@@ -10,6 +10,7 @@ import wandb
 from omegaconf import DictConfig
 from src.opt_algos.toy_game_optimisation import train_NG, train_target_based_surrogate
 from src.opt_algos.expert_sampling import get_expert_trajectories
+from src.opt_algos.gail_optimisation import get_agent_trajectories
 
 
 @hydra.main(version_base="1.3", config_path="configs", config_name="tbs_rps.yaml")
@@ -79,15 +80,34 @@ def main(cfg: DictConfig) -> None:
         discriminator = hydra.utils.instantiate(cfg.discriminator_net, state_dim, action_dim, discrete).to(device)
         
         # TODO: DEFINE train_GAIL()
-        get_expert_trajectories(
+        expert_reward_mean, _, _ = get_expert_trajectories(
             env=env,
             expert=expert,
-            num_sa_pairs=2000,
-            horizon=2000,
-            device=torch.device("cuda:0"),
-            # render_gif=True, # TODO: uncomment this, just add config options for it.
-            # gif_path=experts_path,
+            num_sa_pairs=cfg.expert_hyperparams.num_steps_per_iter,
+            horizon=cfg.expert_hyperparams.horizon,
+            device=device,
+            render_gif=cfg.expert_hyperparams.render_gif,
+            gif_path=experts_path,
         )
+        print(f"Expert reward mean: {expert_reward_mean}")
+
+        out = get_agent_trajectories(
+            env=env,
+            agent_model=policy_net,
+            value_function=value_net,
+            discriminator=discriminator,
+            num_sa_pairs=cfg.training_hyperparams.num_steps_per_iter,
+            horizon=cfg.training_hyperparams.horizon,
+            gamma=cfg.training_hyperparams.gae_gamma,
+            lambd=cfg.training_hyperparams.gae_lambda,
+            normalize_advantage=cfg.training_hyperparams.normalize_advantage,
+            device=device,
+        )
+
+        print(f"Agent reward mean {out[0]}")
+
+        # Get rid of the environment, don't need it anymore.
+        env.close()
 
         # Save the trained models
         torch.save(

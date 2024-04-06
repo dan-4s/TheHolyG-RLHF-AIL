@@ -14,13 +14,13 @@ TODO: the expert is only sampling num_sa_pairs over a single trajectory
 import gym
 import numpy as np
 import os
-import time
 import torch
 
 import matplotlib.pyplot as plt
 import matplotlib.animation as animation
 
 
+@torch.no_grad() # disable gradient tracking in this function.
 def get_expert_trajectories(
         env: gym.Env,
         expert: torch.nn.Module,
@@ -29,7 +29,7 @@ def get_expert_trajectories(
         device: torch.DeviceObjType,
         render_gif: bool = False,
         gif_path: str = None,
-    ):
+    ) -> tuple[float, torch.Tensor, torch.Tensor]:
     """
     This function queries the expert model to generate trajectories of
     state-action pairs.
@@ -47,6 +47,8 @@ def get_expert_trajectories(
         `tuple[float, torch.Tensor, torch.Tensor]`: the expert reward mean,
             state and action tensors.
     """
+    expert.eval()
+
     # Variables to track trajectory generation.
     num_gen_traj = 0
     expert_obs = []
@@ -66,7 +68,7 @@ def get_expert_trajectories(
             obs = torch.tensor(obs, device=device).float()
             expert_action = expert.act(obs)
             expert_obs.append(obs)
-            expert_actions.append(expert_action)
+            expert_actions.append(torch.tensor(expert_action))
 
             obs, reward, episode_done, _, _ = env.step(expert_action)
             episode_reward += reward
@@ -106,12 +108,11 @@ def get_expert_trajectories(
             animation_fig.save(os.path.join(gif_path, f"trajectory_{num_gen_traj+1}.gif"))
         num_gen_traj += 1
     
-    # Log relevant information
+    # Get relevant logging information
     exp_rwd_mean = np.mean(expert_reward).item()
-    print(f"Expert Reward Mean: {exp_rwd_mean}")
 
     # Convert data to tensors.
-    t_obs = torch.tensor(expert_obs, device=device).float()
+    t_obs = torch.stack(expert_obs, dim=0)
     t_acts = torch.tensor(expert_actions, device=device).float()
 
     return exp_rwd_mean, t_obs, t_acts
