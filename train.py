@@ -10,7 +10,7 @@ import wandb
 from omegaconf import DictConfig
 from src.opt_algos.toy_game_optimisation import train_NG, train_target_based_surrogate
 from src.opt_algos.expert_sampling import get_expert_trajectories
-from src.opt_algos.gail_optimisation import get_agent_trajectories
+from src.opt_algos.agent_sampling import get_agent_trajectories
 
 
 @hydra.main(version_base="1.3", config_path="configs", config_name="tbs_rps.yaml")
