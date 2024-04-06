@@ -2,6 +2,8 @@
 This file implements the GAIL optimisation algorithms. Code is taken from
 https://github.com/hcnoh/gail-pytorch/blob/main/models/gail.py,
 and is improved.
+
+TODO: Add feature to save the gifs of trajectories over training runs.
 """
 
 import gym
@@ -179,11 +181,4 @@ def get_agent_trajectories(
         agent_advantages,
         agent_gammas,
     )
-
-
-    
-
-
-
-
 
