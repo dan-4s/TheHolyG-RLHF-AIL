@@ -1,5 +1,5 @@
 """
-This file implements the GAIL optimisation algorithms. Code is taken from
+This file implements trajectory sampling for the agent. Code is taken from
 https://github.com/hcnoh/gail-pytorch/blob/main/models/gail.py,
 and is improved.
 
@@ -124,6 +124,8 @@ def get_agent_trajectories(
         #   acts as a Q-function for us, we just take the discriminator output
         #   and sum over the trajectory length, from each state-action pair:
         #       sum_t(gamma^t * discriminator(s_t, a_t)).
+        # NOTE: episode_costs are negative since we are maximising the expected
+        #       return. TODO: Veryify that this intuition is correct!!!
         episode_costs = (-1) * torch.log(
             discriminator(episode_obs, episode_acts),
         ).squeeze().detach()
