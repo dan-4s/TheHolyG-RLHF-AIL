@@ -79,7 +79,16 @@ def main(cfg: DictConfig) -> None:
         discriminator = hydra.utils.instantiate(cfg.discriminator_net, state_dim, action_dim, discrete).to(device)
         
         # TODO: test train_GAIL()
-        out = train_GAIL()
+        train_GAIL(
+            env=env,
+            expert=expert,
+            agent_model=policy_net,
+            value_function=value_net,
+            discriminator=discriminator,
+            cfg=cfg,
+            device=device,
+            experts_path=experts_path,
+        )
 
         # Get rid of the environment, don't need it anymore.
         env.close()

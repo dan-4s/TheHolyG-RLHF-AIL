@@ -160,7 +160,6 @@ def get_agent_trajectories(
         agent_advantages.append(episode_advantages)
     
     # Convert the lists of tensors to tensors
-    breakpoint()
     agent_obs = torch.stack(agent_obs, dim=0)
     agent_actions = torch.tensor(agent_actions, device=device)
     agent_returns = torch.cat(agent_returns, dim=0)

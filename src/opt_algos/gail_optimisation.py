@@ -73,7 +73,7 @@ class KLDivergence():
         self.old_cov = old_cov
         self.old_probs = old_probs
         self.action_dim = action_dim
-        self.is_dicrete = is_discrete
+        self.is_discrete = is_discrete
     
     def __call__(self):
         """
@@ -137,6 +137,97 @@ class HessianVectorProduct():
             params=self.agent_model.parameters(),
         ).detach()
         return hessian + self.damping * vector
+
+
+def conjugate_gradient(
+    hessian_vector_prod_fn: HessianVectorProduct,
+    loss_gradient: torch.Tensor,
+) -> torch.Tensor:
+    """
+    Using the conjugate gradient method, computes the descent direction by
+    sucessively minimising the residual between the Hessian-vector product term
+    and the gradient. Once the residual is sufficiently small, we return the
+    vector which achieved the small residual.
+
+    Estimate x such that Ax = b, for a known A and b.
+        - r1 = b - Ax1
+        - x2 = x + alpha * r1
+        - r2 = r1 - alpha * Ar1 -> This is a descent step on the residual!!!
+        - ...
+    """
+    # Code taken from the GAIL implementation.
+    x = torch.zeros_like(loss_gradient)
+    r = loss_gradient - hessian_vector_prod_fn(x)
+    p = r
+    rsold = r.norm() ** 2
+
+    for _ in range(10):
+        Ap = hessian_vector_prod_fn(p)
+        alpha = rsold / torch.dot(p, Ap)
+        x = x + alpha * p
+        r = r - alpha * Ap
+        rsnew = r.norm() ** 2
+        if(torch.sqrt(rsnew) < 1e-10):
+            break
+        p = r + (rsnew / rsold) * p
+        rsold = rsnew
+
+    return x
+
+
+def get_flat_params(net):
+    return torch.cat([param.view(-1) for param in net.parameters()])
+
+
+def set_params(net, new_flat_params):
+    start_idx = 0
+    for param in net.parameters():
+        end_idx = start_idx + np.prod(list(param.shape))
+        param.data = torch.reshape(
+            new_flat_params[start_idx:end_idx], param.shape
+        )
+        start_idx = end_idx
+
+
+def line_search(
+    max_kl_constraint: float,
+    loss_gradient: torch.Tensor,
+    descent_dir: torch.Tensor,
+    hessian_descent_dir: torch.Tensor,
+    kl_div_fn: KLDivergence,
+    loss_fn: TRPOLoss,
+    model: torch.nn.Module,
+):
+    """
+    Do a line search to find a feasible point where the KL constraint is
+    satisfied and the loss has improved by a satisfactory amount.
+    """
+    old_params = get_flat_params(model)
+    old_loss = loss_fn().detach()
+
+    # Set the initial step size
+    beta = torch.sqrt(
+        2 * max_kl_constraint / torch.dot(descent_dir, hessian_descent_dir))
+
+    for _ in range(10):
+        new_params = old_params + beta * descent_dir
+        set_params(model, new_params)
+        new_kl_div = kl_div_fn().detach()
+        new_loss = loss_fn().detach()
+
+        improvement = new_loss - old_loss
+        approx_improvement = torch.dot(loss_gradient, beta*descent_dir)
+        improvement_ratio = improvement / approx_improvement
+        if(improvement_ratio > 0.1 and
+           improvement > 0 and
+           new_kl_div < max_kl_constraint):
+            return new_params
+        
+        # Exponentially decay the step size, beta.
+        beta *= 0.5
+    
+    print("No feasible solution found in line search")
+    return old_params
 
 
 def train_GAIL(
@@ -299,7 +390,10 @@ def train_GAIL(
         old_mean = old_distribution.mean.detach()
         old_probs = old_distribution.probs.detach()
         old_log_prob_acts = old_distribution.log_prob(agent_actions).detach()
-        old_cov_mat = old_distribution.covariance_matrix.sum(-1).detach()
+        if(not cfg.env.discrete):
+            old_cov_mat = old_distribution.covariance_matrix.sum(-1).detach()
+        else:
+            old_cov_mat = None
 
         # Set up the TRPO loss and KL Divergence.
         trpo_loss_fn = TRPOLoss(
@@ -331,17 +425,62 @@ def train_GAIL(
             damping=cfg.training_hyperparams.cg_damping,
         )
 
-        # Now, we're ready to use the conjugate gradient algorithm!
-        # TODO! 
-
-
-
-
-
-
-
+        # Now, we're ready to use the conjugate gradient algorithm! The steps
+        # are:
+        #   1. Compute the gradient of your loss function.
+        #   2. Using this gradient, compute the descent direction using the
+        #       conjugate gradient algorithm -> find x s.t. Hx = gradient!
+        #       Where x is the descent direction. and H is the Hessian of the
+        #       KL divergence. -> notice: x = H^-1 * gradient, this is Newton's
+        #       method!!!
+        #   3. Search along this descent direction for a parameter update that
+        #       satisfies the TRPO constraints: small KL divergence, and a
+        #       monotonically increasing loss function (reward)!
+        trpo_loss = trpo_loss_fn()
         
+        loss_gradient = get_flat_grads(
+            output=trpo_loss,
+            params=agent_model.parameters(),
+        ).detach() # Detach since we don't want to compute gradients on this.
         
+        descent_dir = conjugate_gradient(
+            hessian_vector_prod_fn, loss_gradient).detach()
+        hessian_descent_dir = hessian_vector_prod_fn(descent_dir).detach()
 
+        # Now do a line search.
+        new_params = line_search(
+            max_kl_constraint=cfg.training_hyperparams.max_kl,
+            loss_gradient=loss_gradient,
+            descent_dir=descent_dir,
+            hessian_descent_dir=hessian_descent_dir,
+            kl_div_fn=kl_divergence_fn,
+            loss_fn=trpo_loss_fn,
+            model=agent_model,
+        )
 
+        # Now, update the parameters according to the causal entropy
+        # regulariser.
+        # NOTE: doing this after the line search means we are updating the
+        # params according to the causal entropy after we updated them for the
+        # line search... This may not be ideal.
+        causal_entropy = cfg.training_hyperparams.ce_lambda *  torch.mean(
+            (-1) * agent_gammas *\
+            agent_model(agent_obs).log_prob(agent_actions)
+        )
+        trpo_loss += causal_entropy
+        grad_causal_entropy = get_flat_grads(
+            output=causal_entropy,
+            params=agent_model.parameters()
+        )
+        new_params += grad_causal_entropy
 
+        set_params(agent_model, new_params)
+
+        # Log relevant values
+        wandb.log({
+            "Agent Reward Mean": agent_reward_mean,
+            "Time (minutes)": (time.time() - start_time) / 60,
+            "TRPO LOSS": trpo_loss.item(),
+            "VALUE LOSS": value_loss.item(),
+            "DISCRIMINATOR LOSS": disc_loss.item(),
+        })
