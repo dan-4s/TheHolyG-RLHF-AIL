@@ -7,12 +7,50 @@ TODO: Add feature to save the gifs of trajectories over training runs.
 """
 
 import gym
+import math
 import numpy as np
 import os
 import torch
 
 import matplotlib.pyplot as plt
 import matplotlib.animation as animation
+
+
+def stable_reverse_discounting(values: torch.Tensor, discounts: torch.Tensor):
+    """
+    Apply the discount vector to the values vector to get back the cummulative
+    sum of discounts starting from the initial discount to the n-jth discount,
+    where j is the current index of the vector. The implementation uses block
+    multiplication to improve efficiency. A simple proof shows that this method
+    surpasses most others in time and space complexity.
+
+    NOTE: The torch matmul operation (@ in this code) actually has more
+    numerical instability than a simple vector-vector multiple then sum! Since
+    we don't actually care too much about the exact value of the advantage
+    functions, we can more or less ignore these small errors in favour of a
+    more stable algorithm which won't crash the training process!
+    """
+    size = discounts.shape[0]
+    m = min(50, size) # In case we just need to do a single run!
+    discounts_matrix = torch.zeros(
+        size=(size, m),
+        device=values.device,
+    )
+    for idx in range(m):
+        discounts_matrix[idx:, idx] = discounts[0:size-idx]
+    
+    output = torch.zeros_like(values, device=values.device)
+
+    # Build the output block-by-block
+    num_blocks = math.ceil(size / m)
+    for idx in range(num_blocks):
+        start = idx * m
+        end = start + m
+        if(end > size):
+            end = size
+        width = end - start
+        output[start : end] = values[start:] @ discounts_matrix[0:size-start, 0:width]
+    return output
 
 
 @torch.no_grad() # disable gradient tracking in this function.
@@ -129,12 +167,17 @@ def get_agent_trajectories(
         episode_costs = (-1) * torch.log(
             discriminator(episode_obs, episode_acts),
         ).squeeze().detach()
-        episode_disc_costs = episode_gammas * episode_costs
+        
+        # OLD CODE: KEEPING FOR POSTERITY, TODO: REMOVE LATER!
+        # episode_disc_costs = episode_gammas * episode_costs
         # Do a reverse cumsum to get the return for each state-action pair.
-        episode_returns = episode_disc_costs - \
-            episode_disc_costs.cumsum(dim=0) + episode_disc_costs.sum(dim=0)
+        # episode_returns = episode_disc_costs - \
+            # episode_disc_costs.cumsum(dim=0) + episode_disc_costs.sum(dim=0)
         # Scale the returns (gets rid of extra gamma terms)
-        episode_returns = episode_returns / episode_gammas
+        # episode_returns = episode_returns / episode_gammas
+        episode_returns = stable_reverse_discounting(
+            episode_costs, episode_gammas,
+        )
         agent_returns.append(episode_returns)
 
         # Next, compute the advantage. The advantage in this instance is going
@@ -151,12 +194,16 @@ def get_agent_trajectories(
             dim=0,
         )
         ind_advantages = episode_costs - value_s + gamma*next_value
+        # OLD CODE: KEEPING FOR POSTERITY, TODO: REMOVE LATER!
         # Discount the individual advantages
-        ind_advantages = episode_gammas * episode_lambdas * ind_advantages
-        episode_advantages = ind_advantages - \
-            ind_advantages.cumsum(dim=0) + ind_advantages.sum(dim=0)
-        # Scale the individual advantages to remove extra discounts.
-        episode_advantages = episode_advantages / (episode_gammas * episode_lambdas)
+        # ind_advantages = episode_gammas * episode_lambdas * ind_advantages
+        # episode_advantages = ind_advantages - \
+        #     ind_advantages.cumsum(dim=0) + ind_advantages.sum(dim=0)
+        # # Scale the individual advantages to remove extra discounts.
+        # episode_advantages = episode_advantages / (episode_gammas * episode_lambdas)
+        episode_advantages = stable_reverse_discounting(
+            ind_advantages, episode_lambdas * episode_gammas,
+        )
         agent_advantages.append(episode_advantages)
     
     # Convert the lists of tensors to tensors
@@ -173,6 +220,8 @@ def get_agent_trajectories(
     if(normalize_advantage):
         agent_advantages = (agent_advantages - agent_advantages.mean()
                             ) / agent_advantages.std()
+    # if(agent_advantages.isnan().sum() > 0):
+    #     breakpoint()
     
     return (
         agent_rwd_mean,

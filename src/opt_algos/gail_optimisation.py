@@ -202,6 +202,9 @@ def line_search(
     Do a line search to find a feasible point where the KL constraint is
     satisfied and the loss has improved by a satisfactory amount.
     """
+    if(hessian_descent_dir.isnan().sum() > 0):
+        print("HESSIAN NAN!!!")
+    # breakpoint()
     old_params = get_flat_params(model)
     old_loss = loss_fn().detach()
 
@@ -404,6 +407,8 @@ def train_GAIL(
             agent_model=agent_model,
             old_log_prob_acts=old_log_prob_acts,
         )
+        # if(trpo_loss_fn().isnan().item()):
+        #     breakpoint()
         kl_divergence_fn = KLDivergence(
             agent_obs=agent_obs,
             agent_model=agent_model,
@@ -468,7 +473,7 @@ def train_GAIL(
             (-1) * agent_gammas *\
             agent_model(agent_obs).log_prob(agent_actions)
         )
-        trpo_loss += causal_entropy
+        trpo_loss += causal_entropy.detach()
         grad_causal_entropy = get_flat_grads(
             output=causal_entropy,
             params=agent_model.parameters()
@@ -477,6 +482,7 @@ def train_GAIL(
 
         set_params(agent_model, new_params)
 
+        # breakpoint()
         # Log relevant values
         wandb.log({
             "Agent Reward Mean": agent_reward_mean,
