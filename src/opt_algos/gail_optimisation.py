@@ -388,12 +388,13 @@ def train_GAIL(
         agent_optim.zero_grad()
         old_distribution = agent_model(agent_obs)
         old_mean = old_distribution.mean.detach()
-        old_probs = old_distribution.probs.detach()
         old_log_prob_acts = old_distribution.log_prob(agent_actions).detach()
         if(not cfg.env.discrete):
             old_cov_mat = old_distribution.covariance_matrix.sum(-1).detach()
+            old_probs = None
         else:
             old_cov_mat = None
+            old_probs = old_distribution.probs.detach()
 
         # Set up the TRPO loss and KL Divergence.
         trpo_loss_fn = TRPOLoss(
@@ -409,7 +410,7 @@ def train_GAIL(
             old_mean=old_mean,
             old_cov=old_cov_mat,
             old_probs=old_probs,
-            action_dim=cfg.env.action_dim,
+            action_dim=agent_model.action_dim,
             is_discrete=cfg.env.discrete,
         )
 

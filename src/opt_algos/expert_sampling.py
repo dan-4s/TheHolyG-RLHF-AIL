@@ -68,7 +68,9 @@ def get_expert_trajectories(
             obs = torch.tensor(obs, device=device).float()
             expert_action = expert.act(obs)
             expert_obs.append(obs)
-            expert_actions.append(torch.tensor(expert_action))
+            expert_actions.append(
+                torch.tensor(expert_action, device=device),
+            )
 
             obs, reward, episode_done, _, _ = env.step(expert_action)
             episode_reward += reward
@@ -113,6 +115,6 @@ def get_expert_trajectories(
 
     # Convert data to tensors.
     t_obs = torch.stack(expert_obs, dim=0)
-    t_acts = torch.tensor(expert_actions, device=device).float()
+    t_acts = torch.stack(expert_actions).float()
 
     return exp_rwd_mean, t_obs, t_acts

@@ -36,10 +36,13 @@ def main(cfg: DictConfig) -> None:
         env = hydra.utils.instantiate(cfg.env, device=device)
     else:
         discrete = cfg.env.discrete
-        action_dim = cfg.env.action_dim
-        state_dim = cfg.env.state_dim
         env = gym.make(cfg.env._target_, render_mode="rgb_array")
         env.reset()
+        if(discrete):
+            action_dim = env.action_space.n
+        else:
+            action_dim = env.action_space.shape[0]
+        state_dim = len(env.observation_space.high)
         # Can add assert statements here to ensure that action_dim and
         # state_dim match what we have set.
 
@@ -54,7 +57,7 @@ def main(cfg: DictConfig) -> None:
             train_target_based_surrogate(env, player_1, player_2, device, **cfg.training_hyperparams)
     elif(cfg.algo.algo == "GAIL"):
         # Expert network from which we sample trajectories.
-        expert = hydra.utils.instantiate(cfg.expert_net, state_dim, action_dim, discrete).to(device)
+        expert = hydra.utils.instantiate(cfg.expert_net, state_dim, action_dim, discrete, device).to(device)
         experts_path = os.path.join("experts", cfg.env._target_)
         expert_weights = os.path.join(experts_path, "policy.ckpt")
         expert_state_dict = torch.load(expert_weights, map_location=device)
@@ -72,13 +75,12 @@ def main(cfg: DictConfig) -> None:
             os.makedirs(model_save_dir)
 
         # Policy we're training.
-        policy_net = hydra.utils.instantiate(cfg.policy_net, state_dim, action_dim, discrete).to(device)
+        policy_net = hydra.utils.instantiate(cfg.policy_net, state_dim, action_dim, discrete, device).to(device)
         # Value (or advantage or quality) network / critic.
         value_net = hydra.utils.instantiate(cfg.value_net, state_dim).to(device)
         # The discriminator in a GAIL setting, this is c(s,a) in the paper
         discriminator = hydra.utils.instantiate(cfg.discriminator_net, state_dim, action_dim, discrete).to(device)
         
-        # TODO: test train_GAIL()
         train_GAIL(
             env=env,
             expert=expert,

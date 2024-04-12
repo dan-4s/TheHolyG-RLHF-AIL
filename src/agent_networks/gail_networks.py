@@ -17,7 +17,7 @@ from torch.distributions import Categorical, MultivariateNormal
 
 
 class PolicyNetwork(Module):
-    def __init__(self, state_dim, action_dim, discrete) -> None:
+    def __init__(self, state_dim, action_dim, discrete, device=None) -> None:
         super().__init__()
 
         self.net = Sequential(
@@ -33,6 +33,8 @@ class PolicyNetwork(Module):
         self.state_dim = state_dim
         self.action_dim = action_dim
         self.discrete = discrete
+        self.device = device
+        self.eye = torch.eye(self.action_dim).to(device)
 
         if not self.discrete:
             self.log_std = Parameter(torch.zeros(action_dim))
@@ -45,7 +47,7 @@ class PolicyNetwork(Module):
             mean = self.net(states)
 
             std = torch.exp(self.log_std)
-            cov_mtx = torch.eye(self.action_dim) * (std ** 2)
+            cov_mtx = self.eye * (std ** 2)
 
             distb = MultivariateNormal(mean, cov_mtx)
 
@@ -114,6 +116,7 @@ class Expert(Module):
         state_dim,
         action_dim,
         discrete,
+        device=None,
         train_config=None
     ) -> None:
         super().__init__()
@@ -122,8 +125,9 @@ class Expert(Module):
         self.action_dim = action_dim
         self.discrete = discrete
         self.train_config = train_config
+        self.device = device
 
-        self.pi = PolicyNetwork(self.state_dim, self.action_dim, self.discrete)
+        self.pi = PolicyNetwork(self.state_dim, self.action_dim, self.discrete, device)
 
     def get_networks(self):
         return [self.pi]

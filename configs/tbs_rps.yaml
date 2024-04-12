@@ -27,6 +27,7 @@ training_hyperparams:
 # Wandb settings
 wandb:
     project: HCC_NG_vs_TBS
+    job_type: toy_rps
     tags: [NG_vs_TBS]
     mode: online # Whether to use wandb [disabled, online]
     run_name: null

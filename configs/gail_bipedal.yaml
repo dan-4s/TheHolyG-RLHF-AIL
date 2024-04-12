@@ -1,17 +1,17 @@
 env:
-    _target_: "CartPole-v1"
+    _target_: "BipedalWalker-v3"
     gym: True
-    discrete: True # Discrete action space
+    discrete: False # Discrete action space
 
 expert_hyperparams:
-    num_iters: 200
-    num_steps_per_iter: 2000
+    num_iters: 1000
+    num_steps_per_iter: 5000
     horizon: null
     render_gif: False
 
 training_hyperparams:
-    num_iters: 200
-    num_steps_per_iter: 2000
+    num_iters: 1000
+    num_steps_per_iter: 5000
     horizon: null
     lr: 1e-3
     ce_lambda: 1e-3
@@ -41,7 +41,7 @@ discriminator_net:
 # Wandb settings
 wandb:
     project: HCC_NG_vs_TBS
-    job_type: cartpole
+    job_type: bipedal
     tags: [NG_vs_TBS]
     mode: online # Whether to use wandb [disabled, online]
     run_name: null

@@ -114,7 +114,7 @@ def get_agent_trajectories(
 
         #   First, convert all episode observations to tensors
         episode_obs     = torch.stack(episode_obs, dim=0)
-        episode_acts    = torch.tensor(episode_acts, device=device).float()
+        episode_acts    = torch.stack(episode_acts).to(device).float()
         episode_gammas  = torch.tensor(episode_gammas, device=device).float()
         episode_lambdas = torch.tensor(episode_lambdas, device=device).float()
         agent_gammas.append(episode_gammas)
@@ -161,7 +161,7 @@ def get_agent_trajectories(
     
     # Convert the lists of tensors to tensors
     agent_obs = torch.stack(agent_obs, dim=0)
-    agent_actions = torch.tensor(agent_actions, device=device)
+    agent_actions = torch.stack(agent_actions).to(device)
     agent_returns = torch.cat(agent_returns, dim=0)
     agent_advantages = torch.cat(agent_advantages, dim=0)
     agent_gammas = torch.cat(agent_gammas, dim=0)
