@@ -8,6 +8,7 @@ import torch
 from torch.nn import Module
 from torch.nn import Parameter
 from functorch import make_functional, jacrev, vmap
+import time
 from tqdm import tqdm
 import wandb
 
@@ -90,6 +91,7 @@ def train_NG(
     
     input = torch.tensor([[0.0, 1.0, 0.0]], device=device)
     lr = base_lr
+    start_time = time.time()
     for step in (pbar := tqdm(range(num_iters), unit="Step")):
         # Schedule a linearly decreasing learning rate
         if(lr_schedule):
@@ -123,6 +125,7 @@ def train_NG(
         
         wandb.log({
             "loss": p1_loss.item(),
+            "time": time.time() - start_time,
         })
     
     return p1_pred, p2_pred, p1_loss.item()
@@ -189,6 +192,7 @@ def train_target_based_surrogate(
     
     input = torch.tensor([[0.0, 1.0, 0.0]], device=device)
     lr = base_lr
+    start_time = time.time()
     for step in (pbar := tqdm(range(num_iters), unit="Step")):
         # Schedule a linearly decreasing learning rate
         if(lr_schedule):
@@ -243,6 +247,7 @@ def train_target_based_surrogate(
         
         wandb.log({
             "loss": p1_loss.item(),
+            "time": time.time() - start_time,
         })
     
     return p1_pred, p2_pred, p1_loss.item()
