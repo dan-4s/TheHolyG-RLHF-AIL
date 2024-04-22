@@ -170,7 +170,7 @@ def get_agent_trajectories(
         #   and sum over the trajectory length, from each state-action pair:
         #       sum_t(gamma^t * discriminator(s_t, a_t)).
         # NOTE: episode_costs are negative since we are maximising the expected
-        #       return. TODO: Verify that this intuition is correct!!!
+        #       return.
         episode_costs = (-1) * torch.log(
             discriminator(episode_obs, episode_acts),
         ).squeeze().detach()

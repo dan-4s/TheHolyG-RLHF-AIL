@@ -48,8 +48,6 @@ def __compute_disc_surrogate_loss(
     agent_surrogate = agent_inner + (1/(2*eta)) * D_diff_agent.norm().pow(2)
 
     surrogate_loss = expert_surrogate.mean() + agent_surrogate.mean()
-    # TODO: Check if this is correct!
-    # surrogate_loss = -surrogate_loss # Maximising discriminator!
     return surrogate_loss
 
 
