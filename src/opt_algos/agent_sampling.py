@@ -31,6 +31,10 @@ def stable_reverse_discounting(values: torch.Tensor, discounts: torch.Tensor):
     more stable algorithm which won't crash the training process!
     """
     size = discounts.shape[0]
+    if(size == 1):
+        # Corner case: a single state-action pair was observed. Handle by
+        # simple return.
+        return values * discounts
     m = min(50, size) # In case we just need to do a single run!
     discounts_matrix = torch.zeros(
         size=(size, m),
@@ -49,7 +53,10 @@ def stable_reverse_discounting(values: torch.Tensor, discounts: torch.Tensor):
         if(end > size):
             end = size
         width = end - start
-        output[start : end] = values[start:] @ discounts_matrix[0:size-start, 0:width]
+        try:
+            output[start : end] = values[start:] @ discounts_matrix[0:size-start, 0:width]
+        except:
+            breakpoint()
     return output
 
 
@@ -138,8 +145,8 @@ def get_agent_trajectories(
             obs, reward, episode_done, _, _ = env.step(agent_action)
             episode_reward += reward
             
-            if(horizon is not None and 
-                num_steps >= horizon or
+            if((horizon is not None and 
+                num_steps >= horizon) or
                 len(agent_obs) >= num_sa_pairs):
                 # We have hit the max episode length or generated all the data
                 # we needed to generate, finish the episode.
@@ -150,7 +157,7 @@ def get_agent_trajectories(
         # Episode done, compute all statistics including advantage and return.
         agent_reward.append(episode_reward)
 
-        #   First, convert all episode observations to tensors
+        # First, convert all episode observations to tensors
         episode_obs     = torch.stack(episode_obs, dim=0)
         episode_acts    = torch.stack(episode_acts).to(device).float()
         episode_gammas  = torch.tensor(episode_gammas, device=device).float()
@@ -163,7 +170,7 @@ def get_agent_trajectories(
         #   and sum over the trajectory length, from each state-action pair:
         #       sum_t(gamma^t * discriminator(s_t, a_t)).
         # NOTE: episode_costs are negative since we are maximising the expected
-        #       return. TODO: Veryify that this intuition is correct!!!
+        #       return. TODO: Verify that this intuition is correct!!!
         episode_costs = (-1) * torch.log(
             discriminator(episode_obs, episode_acts),
         ).squeeze().detach()
@@ -189,6 +196,9 @@ def get_agent_trajectories(
         #   from the author of the GAIL repo this was based off of.
         #   Similarly to the returns, we then take the reverse cumsum.
         value_s = value_function(episode_obs).squeeze().detach()
+        # Handles single state-action pair corner case.
+        if(value_s.dim() == 0):
+            value_s = value_s.unsqueeze(0) # TODO: I think this can be avoided by using reshape() instead of squeeze()!!!!
         next_value = torch.cat(
             (value_s[1:], torch.tensor([0.0], device=device)),
             dim=0,

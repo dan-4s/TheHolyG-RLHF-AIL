@@ -4,7 +4,8 @@ update step. The code is heavily based on the code from
 https://github.com/hcnoh/gail-pytorch/blob/main/models/gail.py.
 We update relevant parts and add our own optimisation method.
 """
-
+# Imports
+import copy
 import gym
 import numpy as np
 import os
@@ -22,6 +23,20 @@ from src.agent_networks.gail_networks import (
     PolicyNetwork,
     Expert,
     ValueNetwork
+)
+from src.opt_algos.gail_updates import (
+    gail_discriminator_update,
+)
+from src.opt_algos.surrogate_updates import (
+    tbs_discriminator_update,
+)
+
+# Constants
+GAIL_BASE = "GAIL"
+GAIL_TBS  = "TBS"
+from src.opt_algos.surrogate_updates import (
+    TBS_STD,
+    TBS_OPTIMISTIC,
 )
 
 
@@ -282,24 +297,32 @@ def train_GAIL(
 
     # Training loop: for num_iters, train the model with successive updates to:
     #   1. The discriminator: minimise log(D(agent)) + log(1-D(expert))
-    #   2. The value function: 
-    #   3. The policy: 
+    #   2. The value function: MSE loss between advantages and value prediction
+    #   3. The policy: TRPO update
     num_iters = cfg.training_hyperparams.num_iters
     disc_loss_fn = torch.nn.BCEWithLogitsLoss()
-    value_loss_fn = torch.nn.MSELoss()
-    learning_rate = cfg.training_hyperparams.lr
+    disc_opt_method = cfg.training_hyperparams.disc_opt_method
+    disc_tbs_method = cfg.training_hyperparams.disc_tbs_method
+    disc_inner_loops = cfg.training_hyperparams.disc_inner_loops
+    disc_eta = cfg.training_hyperparams.disc_eta
+    prev_discriminator = None
+    if(disc_opt_method == GAIL_TBS and disc_tbs_method == TBS_OPTIMISTIC):
+        prev_discriminator = copy.deepcopy(discriminator)
     disc_optim = torch.optim.AdamW(
         discriminator.parameters(),
-        lr=learning_rate,
+        lr=cfg.training_hyperparams.lr,
     )
+
+    value_loss_fn = torch.nn.MSELoss()
     value_optim = torch.optim.AdamW(
         value_function.parameters(),
-        lr=learning_rate,
+        lr=cfg.training_hyperparams.lr,
     )
+
     # This is for convenience, we don't actually use the agent's optimiser!
     agent_optim = torch.optim.SGD(
         agent_model.parameters(),
-        lr=learning_rate,
+        lr=cfg.training_hyperparams.lr,
     )
     for step in (pbar := tqdm(range(num_iters), unit="Step")):
         out = get_agent_trajectories(
@@ -324,22 +347,35 @@ def train_GAIL(
         ) = out
         tqdm.write(f"STEP {step}: Agent reward mean {agent_reward_mean}")
 
-        # Compute the loss for the discriminator.
+        # Compute the loss and update for the discriminator.
         discriminator.train()
-        disc_optim.zero_grad()
-        expert_scores = discriminator.get_logits(expert_obs, expert_actions)
-        agent_scores = discriminator.get_logits(agent_obs, agent_actions)
-        expert_disc_loss = disc_loss_fn(
-            expert_scores,
-            torch.zeros_like(expert_scores, device=device),
-        )
-        agent_disc_loss = disc_loss_fn(
-            agent_scores,
-            torch.ones_like(agent_scores, device=device),
-        )
-        disc_loss = expert_disc_loss + agent_disc_loss
-        disc_loss.backward()
-        disc_optim.step()
+        if(disc_opt_method == GAIL_BASE):
+            disc_loss = gail_discriminator_update(
+                discriminator=discriminator,
+                disc_optim=disc_optim,
+                disc_loss_fn=disc_loss_fn,
+                expert_obs=expert_obs,
+                expert_acts=expert_actions,
+                agent_obs=agent_obs,
+                agent_acts=agent_actions,
+                device=device,
+            )
+        elif(disc_opt_method == GAIL_TBS):
+            disc_loss = tbs_discriminator_update(
+                discriminator=discriminator,
+                prev_discriminator=prev_discriminator,
+                disc_optim=disc_optim,
+                num_inner_loops=disc_inner_loops,
+                eta=disc_eta,
+                expert_obs=expert_obs,
+                expert_acts=expert_actions,
+                agent_obs=agent_obs,
+                agent_acts=agent_actions,
+                method=disc_tbs_method,
+                importance_sampling=None,
+            )
+
+
 
         # Compute the loss for the value function, then compute the parameter
         # update. The value loss function is the MSE between the agent value
