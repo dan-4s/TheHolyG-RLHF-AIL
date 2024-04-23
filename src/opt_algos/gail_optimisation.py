@@ -29,6 +29,7 @@ from src.opt_algos.gail_updates import (
 from src.opt_algos.surrogate_updates import (
     tbs_discriminator_update,
     value_update,
+    tbs_policy_update,
 )
 
 # Constants
@@ -116,8 +117,10 @@ def train_GAIL(
     agent_tbs_method = cfg.training_hyperparams.policy_tbs_method
     agent_inner_loops = cfg.training_hyperparams.policy_inner_loops
     agent_eta = cfg.training_hyperparams.policy_eta
-    # This is for convenience, we don't actually use the agent's optimiser!
-    agent_optim = torch.optim.SGD(
+    prev_agent = None
+    if(agent_opt_method == GAIL_TBS and agent_tbs_method == TBS_OPTIMISTIC):
+        prev_agent = copy.deepcopy(agent_model)
+    agent_optim = torch.optim.AdamW(
         agent_model.parameters(),
         lr=cfg.training_hyperparams.lr,
     )
@@ -226,6 +229,8 @@ def train_GAIL(
                 cfg=cfg,
                 device=device,
             )
+        else:
+            policy_loss = tbs_policy_update(
         agent_model.eval()
 
         # breakpoint()
