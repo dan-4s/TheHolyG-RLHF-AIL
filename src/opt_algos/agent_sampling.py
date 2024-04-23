@@ -60,6 +60,97 @@ def stable_reverse_discounting(values: torch.Tensor, discounts: torch.Tensor):
     return output
 
 
+def get_returns(
+    discriminator: torch.nn.Module,
+    episode_obs: torch.Tensor,
+    episode_acts: torch.Tensor,
+    episode_gammas: torch.Tensor,
+):
+    """
+    Helper function to compute the agent returns given some
+    discriminator network, along with the episode observations, actions,
+    gammas, and lambdas.
+    """
+    # Next, compute the return. The return is simply the discounted
+    #   Q-function estimate of the visited state. Since the discriminator
+    #   acts as a Q-function for us, we just take the discriminator output
+    #   and sum over the trajectory length, from each state-action pair:
+    #       sum_t(gamma^t * discriminator(s_t, a_t)).
+    # NOTE: episode_costs are negative since we are maximising the expected
+    #       return.
+    episode_costs = (-1) * torch.log(
+        discriminator(episode_obs, episode_acts),
+    ).squeeze().detach()
+    
+    # OLD CODE: KEEPING FOR POSTERITY, TODO: REMOVE LATER!
+    # episode_disc_costs = episode_gammas * episode_costs
+    # Do a reverse cumsum to get the return for each state-action pair.
+    # episode_returns = episode_disc_costs - \
+        # episode_disc_costs.cumsum(dim=0) + episode_disc_costs.sum(dim=0)
+    # Scale the returns (gets rid of extra gamma terms)
+    # episode_returns = episode_returns / episode_gammas
+    episode_returns = stable_reverse_discounting(
+        episode_costs, episode_gammas,
+    )
+    return episode_returns
+
+
+def get_advantages(
+    discriminator: torch.nn.Module,
+    value_function: torch.nn.Module,
+    episode_obs: torch.Tensor,
+    episode_acts: torch.Tensor,
+    episode_gammas: torch.Tensor,
+    episode_lambdas: torch.Tensor,
+    gamma: float,
+    device: torch.DeviceObjType,
+):
+    """
+    Helper function to compute the agent advantages given some
+    value function and discriminator networks, along with the episode
+    observations, actions, gammas, and lambdas.
+    """
+    # Next, compute the return. The return is simply the discounted
+    #   Q-function estimate of the visited state. Since the discriminator
+    #   acts as a Q-function for us, we just take the discriminator output
+    #   and sum over the trajectory length, from each state-action pair:
+    #       sum_t(gamma^t * discriminator(s_t, a_t)).
+    # NOTE: episode_costs are negative since we are maximising the expected
+    #       return.
+    episode_costs = (-1) * torch.log(
+        discriminator(episode_obs, episode_acts),
+    ).squeeze().detach()
+    
+    # Next, compute the advantage. The advantage in this instance is going
+    #   to be the Q-function subtracted from the value function. In this
+    #   case, it is basically: discriminator(s,a) - value_function(s). In
+    #   reality, we do:
+    #     discriminator(s,a) - value_function(s) + gamma*value_function(s')
+    #   Again, I don't know why this equation was used, it is inherited
+    #   from the author of the GAIL repo this was based off of.
+    #   Similarly to the returns, we then take the reverse cumsum.
+    value_s = value_function(episode_obs).squeeze().detach()
+    # Handles single state-action pair corner case.
+    if(value_s.dim() == 0):
+        value_s = value_s.unsqueeze(0) # TODO: I think this can be avoided by using reshape() instead of squeeze()!!!!
+    next_value = torch.cat(
+        (value_s[1:], torch.tensor([0.0], device=device)),
+        dim=0,
+    )
+    ind_advantages = episode_costs - value_s + gamma*next_value
+    # OLD CODE: KEEPING FOR POSTERITY, TODO: REMOVE LATER!
+    # Discount the individual advantages
+    # ind_advantages = episode_gammas * episode_lambdas * ind_advantages
+    # episode_advantages = ind_advantages - \
+    #     ind_advantages.cumsum(dim=0) + ind_advantages.sum(dim=0)
+    # # Scale the individual advantages to remove extra discounts.
+    # episode_advantages = episode_advantages / (episode_gammas * episode_lambdas)
+    episode_advantages = stable_reverse_discounting(
+        ind_advantages, episode_lambdas * episode_gammas,
+    )
+    return episode_advantages
+
+
 @torch.no_grad() # disable gradient tracking in this function.
 def get_agent_trajectories(
         env: gym.Env,
@@ -113,6 +204,7 @@ def get_agent_trajectories(
     agent_advantages = [] # Requires the value function and discriminator
     agent_gammas = []
     agent_reward = []
+    episodes = []
     while len(agent_obs) < num_sa_pairs:
         # Run trajectories until we have a sufficient amount of data.
         obs, _ = env.reset()
@@ -164,57 +256,27 @@ def get_agent_trajectories(
         episode_lambdas = torch.tensor(episode_lambdas, device=device).float()
         agent_gammas.append(episode_gammas)
 
-        # Next, compute the return. The return is simply the discounted
-        #   Q-function estimate of the visited state. Since the discriminator
-        #   acts as a Q-function for us, we just take the discriminator output
-        #   and sum over the trajectory length, from each state-action pair:
-        #       sum_t(gamma^t * discriminator(s_t, a_t)).
-        # NOTE: episode_costs are negative since we are maximising the expected
-        #       return.
-        episode_costs = (-1) * torch.log(
-            discriminator(episode_obs, episode_acts),
-        ).squeeze().detach()
-        
-        # OLD CODE: KEEPING FOR POSTERITY, TODO: REMOVE LATER!
-        # episode_disc_costs = episode_gammas * episode_costs
-        # Do a reverse cumsum to get the return for each state-action pair.
-        # episode_returns = episode_disc_costs - \
-            # episode_disc_costs.cumsum(dim=0) + episode_disc_costs.sum(dim=0)
-        # Scale the returns (gets rid of extra gamma terms)
-        # episode_returns = episode_returns / episode_gammas
-        episode_returns = stable_reverse_discounting(
-            episode_costs, episode_gammas,
+        episode_returns = get_returns(
+            discriminator=discriminator,
+            episode_obs=episode_obs,
+            episode_acts=episode_acts,
+            episode_gammas=episode_gammas,
+        )
+        episode_advantages = get_advantages(
+            discriminator=discriminator,
+            value_function=value_function,
+            episode_obs=episode_obs,
+            episode_acts=episode_acts,
+            episode_gammas=episode_gammas,
+            episode_lambdas=episode_lambdas,
+            gamma=gamma,
+            device=device,
         )
         agent_returns.append(episode_returns)
-
-        # Next, compute the advantage. The advantage in this instance is going
-        #   to be the Q-function subtracted from the value function. In this
-        #   case, it is basically: discriminator(s,a) - value_function(s). In
-        #   reality, we do:
-        #     discriminator(s,a) - value_function(s) + gamma*value_function(s')
-        #   Again, I don't know why this equation was used, it is inherited
-        #   from the author of the GAIL repo this was based off of.
-        #   Similarly to the returns, we then take the reverse cumsum.
-        value_s = value_function(episode_obs).squeeze().detach()
-        # Handles single state-action pair corner case.
-        if(value_s.dim() == 0):
-            value_s = value_s.unsqueeze(0) # TODO: I think this can be avoided by using reshape() instead of squeeze()!!!!
-        next_value = torch.cat(
-            (value_s[1:], torch.tensor([0.0], device=device)),
-            dim=0,
-        )
-        ind_advantages = episode_costs - value_s + gamma*next_value
-        # OLD CODE: KEEPING FOR POSTERITY, TODO: REMOVE LATER!
-        # Discount the individual advantages
-        # ind_advantages = episode_gammas * episode_lambdas * ind_advantages
-        # episode_advantages = ind_advantages - \
-        #     ind_advantages.cumsum(dim=0) + ind_advantages.sum(dim=0)
-        # # Scale the individual advantages to remove extra discounts.
-        # episode_advantages = episode_advantages / (episode_gammas * episode_lambdas)
-        episode_advantages = stable_reverse_discounting(
-            ind_advantages, episode_lambdas * episode_gammas,
-        )
         agent_advantages.append(episode_advantages)
+        episodes.append((
+            episode_obs, episode_acts, episode_gammas, episode_lambdas,
+        ))
     
     # Convert the lists of tensors to tensors
     agent_obs = torch.stack(agent_obs, dim=0)
@@ -240,5 +302,6 @@ def get_agent_trajectories(
         agent_returns,
         agent_advantages,
         agent_gammas,
+        episodes,
     )
 

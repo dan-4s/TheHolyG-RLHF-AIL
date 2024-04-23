@@ -21,11 +21,13 @@ training_hyperparams:
     max_kl: 0.01
     cg_damping: 0.1
     normalize_advantage: True
+    # The following are discriminator hyperparams.
     disc_opt_method: "GAIL" # Use GAIL or TBS
-    # The following are TBS hyperparams.
     disc_tbs_method: "standard" # use optimistic or standard
     disc_inner_loops: 10
     disc_eta: 3e-1
+    # The following are value hyperparams
+    value_inner_loops: 10
 
 algo:
     toy: False

@@ -2,8 +2,11 @@
 This file contains all the surrogate updates to the GAIL objectives.
 """
 # Imports
-import copy
 import torch
+from src.opt_algos.agent_sampling import (
+    get_returns,
+    get_advantages,
+)
 
 
 # Constants
@@ -145,4 +148,70 @@ def tbs_discriminator_update(
         )
         disc_loss = expert_disc_loss + agent_disc_loss
     return disc_loss
+
+
+def value_update(
+    discriminator: torch.nn.Module,
+    value_function: torch.nn.Module,
+    value_optim: torch.optim.Optimizer,
+    value_loss_fn,
+    num_inner_loops: int,
+    episodes: list[tuple[torch.Tensor, torch.Tensor, torch.Tensor, torch.Tensor]],
+):
+    """
+    Compute the value update a number of times using the discriminator to
+    generate agent returns.
+
+    TODO: ADD TBS as an option here!
+    """
+    for _ in range(num_inner_loops):
+        all_returns = []
+        all_obs = []
+        value_optim.zero_grad()
+        # For each episode, compute the return.
+        for episode in episodes:
+            episode_obs, episode_acts, episode_gammas, _ = episode
+            with torch.no_grad():
+                episode_returns = get_returns(
+                    discriminator=discriminator,
+                    episode_obs=episode_obs,
+                    episode_acts=episode_acts,
+                    episode_gammas=episode_gammas,
+                )
+            all_returns.append(episode_returns)
+            all_obs.append(episode_obs)
+        
+        all_obs = torch.cat(all_obs, dim=0)
+        all_returns = torch.cat(all_returns, dim=0)
+        total_loss = value_loss_fn(
+            value_function(all_obs).squeeze(),
+            all_returns,
+        )
+        total_loss.backward()
+        value_optim.step()
+    
+    # Finally, compute the loss so we can log it.
+    value_function.eval()
+    all_returns = []
+    all_obs = []
+    with torch.no_grad():
+        for episode in episodes:
+            episode_obs, episode_acts, episode_gammas, _ = episode
+            with torch.no_grad():
+                episode_returns = get_returns(
+                    discriminator=discriminator,
+                    episode_obs=episode_obs,
+                    episode_acts=episode_acts,
+                    episode_gammas=episode_gammas,
+                )
+            all_returns.append(episode_returns)
+            all_obs.append(episode_obs)
+        all_obs = torch.cat(all_obs, dim=0)
+        all_returns = torch.cat(all_returns, dim=0)
+        total_loss = value_loss_fn(
+            value_function(all_obs).squeeze(),
+            all_returns,
+        )
+    return total_loss
+
 
