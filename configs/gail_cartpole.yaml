@@ -27,7 +27,12 @@ training_hyperparams:
     disc_inner_loops: 10
     disc_eta: 3e-1
     # The following are value hyperparams
-    value_inner_loops: 10
+    value_inner_loops: 1
+    # The following are agent's policy hyperparameters
+    policy_opt_method: "GAIL" # Use GAIL or TBS
+    policy_tbs_method: "standard" # use optimistic or standard
+    policy_inner_loops: 10
+    policy_eta: 3e-1
 
 algo:
     toy: False

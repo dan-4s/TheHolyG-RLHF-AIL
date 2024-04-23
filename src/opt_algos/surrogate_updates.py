@@ -2,11 +2,19 @@
 This file contains all the surrogate updates to the GAIL objectives.
 """
 # Imports
+from omegaconf import DictConfig
 import torch
+from src.agent_networks.gail_networks import (
+    Discriminator,
+    PolicyNetwork,
+    ValueNetwork,
+    Expert,
+)
 from src.opt_algos.agent_sampling import (
     get_returns,
     get_advantages,
 )
+from src.opt_algos.gail_updates import TRPOLoss
 
 
 # Constants
@@ -15,7 +23,7 @@ TBS_STD = "standard"
 
 
 def __compute_disc_surrogate_loss(
-    discriminator: torch.nn.Module,
+    discriminator: Discriminator,
     eta: float,
     expert_obs: torch.Tensor,
     expert_acts: torch.Tensor,
@@ -57,8 +65,8 @@ def __compute_disc_surrogate_loss(
 
 
 def tbs_discriminator_update(
-    discriminator: torch.nn.Module,
-    prev_discriminator: torch.nn.Module,
+    discriminator: Discriminator,
+    prev_discriminator: Discriminator,
     disc_optim: torch.optim.Optimizer,
     num_inner_loops: int,
     eta: float,
@@ -68,7 +76,7 @@ def tbs_discriminator_update(
     agent_acts: torch.Tensor,
     method: str = "standard",
     importance_sampling: torch.Tensor = None,
-) -> tuple[torch.Tensor, torch.nn.Module]:
+) -> torch.Tensor:
     """
     Update the discriminator using target-based surrogates. The specific method
     used can be selected from <`"standard"`, `"optimistic"`>. The former uses a
@@ -153,8 +161,8 @@ def tbs_discriminator_update(
 
 
 def value_update(
-    discriminator: torch.nn.Module,
-    value_function: torch.nn.Module,
+    discriminator: Discriminator,
+    value_function: ValueNetwork,
     value_optim: torch.optim.Optimizer,
     value_loss_fn,
     num_inner_loops: int,
@@ -217,21 +225,49 @@ def value_update(
     return total_loss
 
 
+def __compute_policy_surrogate_loss(
+    agent_model: PolicyNetwork,
+    eta: float,
+    agent_obs: torch.Tensor,
+    agent_acts: torch.Tensor,
+    pi_t: torch.Tensor,
+    grad_J_t: torch.Tensor,
+    grad_J_t_1: torch.Tensor,
+    method: str = TBS_STD,
+) -> torch.Tensor:
+    """
+    Helper function to compute the surrogate loss function for the policy
+    network.
+    """
+    # Get the current estimates and construct the surrogate.
+    log_pi_current = agent_model(agent_obs).log_prob(agent_acts)
+    pi_current = log_pi_current.exp()
+    pi_diff = pi_current - pi_t
+    if(method == TBS_STD):
+        inner = grad_J_t.T @ pi_diff
+    elif(method == TBS_OPTIMISTIC):
+        inner = (2*grad_J_t - grad_J_t_1).T @ pi_diff
+    # TODO: Testing the torch kl_div function rather than defining a custom one
+    #   based on the parameters of the distribution.
+    kl_divergence = torch.nn.functional.kl_div(
+        input=log_pi_current, target=pi_t)
+    surrogate = -inner + (1 / eta) * kl_divergence
+    surrogate_loss = surrogate.mean()
+    return surrogate_loss
+
+
 def tbs_policy_update(
-    discriminator,
-    value_function,
-    agent_model,
-    prev_agent_model,
-    agent_optim,
-    expert_obs,
-    expert_acts,
-    agent_obs,
-    agent_acts,
-    episodes,
-    num_inner_loops,
-    gamma,
-    device,
-    method,
+    discriminator: Discriminator,
+    value_function: ValueNetwork,
+    agent_model: PolicyNetwork,
+    prev_agent_model: PolicyNetwork,
+    agent_optim: torch.optim.Optimizer,
+    agent_obs: torch.Tensor,
+    agent_acts: torch.Tensor,
+    agent_gammas: torch.Tensor,
+    episodes: list[tuple[torch.Tensor, torch.Tensor, torch.Tensor, torch.Tensor]],
+    cfg: DictConfig,
+    device: torch.DeviceObjType,
 ):
     """
     Update the agent's policy function using target-based surrogates. The
@@ -260,7 +296,12 @@ def tbs_policy_update(
             from the old distribution.
     """
     # TODO: Add importance sampling
-    # TODO: Finish!
+    num_inner_loops = cfg.training_hyperparams.policy_inner_loops
+    eta = cfg.training_hyperparams.policy_eta
+    method = cfg.training_hyperparams.policy_tbs_method
+    ce_lambda = cfg.training_hyperparams.ce_lambda
+    gamma = cfg.training_hyperparams.gae_gamma
+
     # Compute the relevant gradient terms and the D_t() terms.
     with torch.no_grad():
         # First, generate the up-to-date advantage estimate.
@@ -281,65 +322,56 @@ def tbs_policy_update(
             curr_advantages.append(episode_advs)
         advantages = torch.cat(curr_advantages, dim=0)
 
-        pi_t = 1
-        grad_J_t = advantages / pi_t
-        D_t_expert = discriminator(expert_obs, expert_acts)
-        D_t_agent  = discriminator(agent_obs, agent_acts)
+        # Get the current (step t) predictions and gradients w.r.t. pi.
+        distribution_t = agent_model(agent_obs)
+        log_pi_t = distribution_t.log_prob(agent_acts)
+        pi_t = log_pi_t.exp()
+        grad_J_t = advantages / pi_t + ce_lambda*(log_pi_t + 1)
 
-        # Compute the gradients of the GAIL loss w.r.t. D_t():
-        #   agent: log(1 - D_t()).
-        #   expert: log(D_t()).
-        grad_D_t_expert = 1 / D_t_expert
-        grad_D_t_agent  = -1 / (1 - D_t_agent + 1e-8)
-
-        # Get the previous predictions and grads (only for optimistic updates)
-        D_t_1_expert = None
-        D_t_1_agent = None
-        grad_D_t_1_expert = None
-        grad_D_t_1_agent = None
+        # Get the previous predictions and grads (only for optimistic updates).
+        distribution_t_1 = None
+        log_pi_t_1 = None
+        pi_t_1 = None
+        grad_J_t_1 = None
         if(method == TBS_OPTIMISTIC):
-            D_t_1_expert = prev_agent_model(expert_obs, expert_acts)
-            D_t_1_agent  = prev_agent_model(agent_obs, agent_acts)
-            grad_D_t_1_expert = 1 / D_t_1_expert
-            grad_D_t_1_agent  = -1 / (1 - D_t_1_agent + 1e-8)
+            distribution_t_1 = prev_agent_model(agent_obs)
+            log_pi_t_1  = distribution_t_1.log_prob(agent_acts)
+            pi_t_1 = log_pi_t_1.exp()
+            grad_J_t_1  = advantages / pi_t_1 + ce_lambda*(log_pi_t_1 + 1)
     
     # Done with the previous discriminator, can replace it with a new copy.
     # NOTE: This will not pass by reference! A new copy of the params is made!
     if(prev_agent_model is not None):
-        prev_agent_model.load_state_dict(discriminator.state_dict())
+        prev_agent_model.load_state_dict(agent_model.state_dict())
 
     for _ in range(num_inner_loops):
         agent_optim.zero_grad()
-        loss = __compute_disc_surrogate_loss(
-            discriminator=discriminator,
+        loss = __compute_policy_surrogate_loss(
+            agent_model=agent_model,
             eta=eta,
-            expert_obs=expert_obs,
-            expert_acts=expert_acts,
             agent_obs=agent_obs,
             agent_acts=agent_acts,
-            D_t_expert=D_t_expert,
-            D_t_agent=D_t_agent,
-            grad_D_t_expert=grad_D_t_expert,
-            grad_D_t_1_expert=grad_D_t_1_expert,
-            grad_D_t_agent=grad_D_t_agent,
-            grad_D_t_1_agent=grad_D_t_1_agent,
+            pi_t=pi_t,
+            grad_J_t=grad_J_t,
+            grad_J_t_1=grad_J_t_1,
             method=method,
         )
         loss.backward()
         agent_optim.step()
     
-    # Updates are done, compute and return the GAIL discriminator loss.
+    # Updates are done, compute and return the GAIL TRPO loss.
+    # TODO: Check the sign of causal entropy, it may not be correct!
     with torch.no_grad():
-        expert_scores = discriminator.get_logits(expert_obs, expert_acts)
-        agent_scores = discriminator.get_logits(agent_obs, expert_acts)
-        disc_loss_fn = torch.nn.functional.binary_cross_entropy_with_logits
-        expert_disc_loss = disc_loss_fn(
-            expert_scores,
-            torch.zeros_like(expert_scores, device=expert_scores.device),
+        trpo_loss_fn = TRPOLoss(
+            advantage=advantages,
+            agent_acts=agent_acts,
+            agent_obs=agent_obs,
+            agent_model=agent_model,
+            old_log_prob_acts=log_pi_t,
         )
-        agent_disc_loss = disc_loss_fn(
-            agent_scores,
-            torch.ones_like(agent_scores, device=agent_scores.device),
+        causal_entropy = ce_lambda *  torch.mean(
+            (-1) * agent_gammas *\
+            agent_model(agent_obs).log_prob(agent_acts)
         )
-        disc_loss = expert_disc_loss + agent_disc_loss
-    return disc_loss
+        trpo_loss = trpo_loss_fn() + causal_entropy
+    return trpo_loss

@@ -229,8 +229,20 @@ def train_GAIL(
                 cfg=cfg,
                 device=device,
             )
-        # else:
-            # policy_loss = tbs_policy_update()
+        else:
+            policy_loss = tbs_policy_update(
+                discriminator=discriminator,
+                value_function=value_function,
+                agent_model=agent_model,
+                prev_agent_model=prev_agent,
+                agent_optim=agent_optim,
+                agent_obs=agent_obs,
+                agent_acts=agent_actions,
+                agent_gammas=agent_gammas,
+                episodes=episodes,
+                cfg=cfg,
+                device=device,
+            )
         agent_model.eval()
 
         # breakpoint()
