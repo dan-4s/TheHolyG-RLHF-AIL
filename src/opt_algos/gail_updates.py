@@ -394,5 +394,5 @@ def gail_policy_update(
     new_params += grad_causal_entropy
 
     set_params(agent_model, new_params)
-    return 
+    return trpo_loss
     

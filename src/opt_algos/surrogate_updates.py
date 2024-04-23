@@ -47,10 +47,12 @@ def __compute_disc_surrogate_loss(
         expert_inner = (2*grad_D_t_expert - grad_D_t_1_expert).T @ D_diff_expert
         agent_inner = (2*grad_D_t_agent - grad_D_t_1_agent).T @ D_diff_agent
     
-    expert_surrogate = expert_inner + (1/(2*eta)) * D_diff_expert.norm().pow(2)
-    agent_surrogate = agent_inner + (1/(2*eta)) * D_diff_agent.norm().pow(2)
+    # Since we're maximising on the discriminator, negate the surrogate.
+    # Potential BUG: Surrogate should be negated, but sometimes works better when it isn't... 
+    expert_surrogate = -expert_inner + (1/(2*eta)) * D_diff_expert.norm().pow(2)
+    agent_surrogate = -agent_inner + (1/(2*eta)) * D_diff_agent.norm().pow(2)
 
-    surrogate_loss = expert_surrogate.mean() + agent_surrogate.mean()
+    surrogate_loss = torch.mean(expert_surrogate + agent_surrogate)
     return surrogate_loss
 
 
@@ -71,11 +73,11 @@ def tbs_discriminator_update(
     Update the discriminator using target-based surrogates. The specific method
     used can be selected from <`"standard"`, `"optimistic"`>. The former uses a
     simple update rule: 
-        maximise grad(log(D_t(s,a))) * (D - D_t) + 1/(2*eta) * norm(D - D_t)^2
+        maximise grad(log(D_t(s,a))) * (D - D_t) - 1/(2*eta) * norm(D - D_t)^2
     
     The optimistic update uses a similar form, but adds the previous gradient:
         maximise (2*grad(log(D_t(s,a))) - grad(log(log(D_{t-1}(s,a))))) *
-            (D - D_t) + 1/(2*eta) * norm(D - D_t)^2
+            (D - D_t) - 1/(2*eta) * norm(D - D_t)^2
     
     These updates are performed for both the expert and the agent, the losses
     are then combined and we compute a gradient step for some number of inner
@@ -216,7 +218,20 @@ def value_update(
 
 
 def tbs_policy_update(
-    
+    discriminator,
+    value_function,
+    agent_model,
+    prev_agent_model,
+    agent_optim,
+    expert_obs,
+    expert_acts,
+    agent_obs,
+    agent_acts,
+    episodes,
+    num_inner_loops,
+    gamma,
+    device,
+    method,
 ):
     """
     Update the agent's policy function using target-based surrogates. The
@@ -251,7 +266,7 @@ def tbs_policy_update(
         # First, generate the up-to-date advantage estimate.
         curr_advantages = []
         for episode in episodes:
-            episode_obs, episode_acts, episode_gammas, _ = episode
+            episode_obs, episode_acts, episode_gammas, episode_lambdas = episode
             with torch.no_grad():
                 episode_advs = get_advantages(
                     discriminator=discriminator,
@@ -266,8 +281,8 @@ def tbs_policy_update(
             curr_advantages.append(episode_advs)
         advantages = torch.cat(curr_advantages, dim=0)
 
-        pi_t
-        grad_J_t = advantages / 
+        pi_t = 1
+        grad_J_t = advantages / pi_t
         D_t_expert = discriminator(expert_obs, expert_acts)
         D_t_agent  = discriminator(agent_obs, agent_acts)
 
@@ -283,18 +298,18 @@ def tbs_policy_update(
         grad_D_t_1_expert = None
         grad_D_t_1_agent = None
         if(method == TBS_OPTIMISTIC):
-            D_t_1_expert = prev_discriminator(expert_obs, expert_acts)
-            D_t_1_agent  = prev_discriminator(agent_obs, agent_acts)
+            D_t_1_expert = prev_agent_model(expert_obs, expert_acts)
+            D_t_1_agent  = prev_agent_model(agent_obs, agent_acts)
             grad_D_t_1_expert = 1 / D_t_1_expert
             grad_D_t_1_agent  = -1 / (1 - D_t_1_agent + 1e-8)
     
     # Done with the previous discriminator, can replace it with a new copy.
     # NOTE: This will not pass by reference! A new copy of the params is made!
-    if(prev_discriminator is not None):
-        prev_discriminator.load_state_dict(discriminator.state_dict())
+    if(prev_agent_model is not None):
+        prev_agent_model.load_state_dict(discriminator.state_dict())
 
     for _ in range(num_inner_loops):
-        disc_optim.zero_grad()
+        agent_optim.zero_grad()
         loss = __compute_disc_surrogate_loss(
             discriminator=discriminator,
             eta=eta,
@@ -311,7 +326,7 @@ def tbs_policy_update(
             method=method,
         )
         loss.backward()
-        disc_optim.step()
+        agent_optim.step()
     
     # Updates are done, compute and return the GAIL discriminator loss.
     with torch.no_grad():
