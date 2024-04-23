@@ -382,9 +382,8 @@ def gail_policy_update(
     # NOTE: doing this after the line search means we are updating the
     # params according to the causal entropy after we updated them for the
     # line search... This may not be ideal.
-    # TODO: Check the sign of causal entropy, it may not be correct!
     causal_entropy = cfg.training_hyperparams.ce_lambda *  torch.mean(
-        (-1) * agent_gammas *\
+        agent_gammas * \
         agent_model(agent_obs).log_prob(agent_actions)
     )
     trpo_loss += causal_entropy.detach()
