@@ -204,8 +204,7 @@ def train_GAIL(
         # NOTE: The discriminator has since been updated, we need to recompute
         #   the returns and advantages!
         value_function.train()
-        # value_loss, old_agent_advantages = value_update(
-        value_loss = value_update(
+        value_loss, old_agent_advantages, new_agent_advantages = value_update(
             discriminator=discriminator,
             value_function=value_function,
             value_optim=value_optim,
@@ -242,7 +241,8 @@ def train_GAIL(
                 agent_obs=agent_obs,
                 agent_acts=agent_actions,
                 agent_gammas=agent_gammas,
-                old_advantages=old_agent_advantages, # TODO: These may be too old!
+                new_advantages=new_agent_advantages,
+                old_advantages=old_agent_advantages,
                 episodes=episodes,
                 cfg=cfg,
                 device=device,

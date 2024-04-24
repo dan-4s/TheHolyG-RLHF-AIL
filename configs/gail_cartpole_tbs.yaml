@@ -23,14 +23,14 @@ training_hyperparams:
     normalize_advantage: True
     # The following are discriminator hyperparams.
     disc_opt_method: "TBS" # Use GAIL or TBS
-    disc_tbs_method: "standard" # use optimistic or standard
+    disc_tbs_method: "optimistic" # use optimistic or standard
     disc_inner_loops: 20
     disc_eta: 3e-1
     # The following are value hyperparams
     value_inner_loops: 20
     # The following are agent's policy hyperparameters
     policy_opt_method: "TBS" # Use GAIL or TBS
-    policy_tbs_method: "standard" # use optimistic or standard
+    policy_tbs_method: "optimistic" # use optimistic or standard
     policy_inner_loops: 20
     policy_eta: 3e-1
 

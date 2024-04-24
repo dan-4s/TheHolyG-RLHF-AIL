@@ -298,8 +298,6 @@ def get_agent_trajectories(
     if(normalize_advantage):
         agent_advantages = (agent_advantages - agent_advantages.mean()
                             ) / agent_advantages.std()
-    # if(agent_advantages.isnan().sum() > 0):
-    #     breakpoint()
     
     return (
         agent_rwd_mean,

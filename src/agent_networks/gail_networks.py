@@ -12,7 +12,9 @@ NOTE: Discrete means that the action space is discrete, so we have a limited
 
 import torch
 
-from torch.nn import Module, Sequential, Linear, Tanh, Parameter, Embedding
+from torch.nn import (
+    Module, Sequential, Linear, Tanh, Parameter, Embedding, GELU,
+)
 from torch.distributions import Categorical, MultivariateNormal
 
 
@@ -60,11 +62,11 @@ class ValueNetwork(Module):
 
         self.net = Sequential(
             Linear(state_dim, 50),
-            Tanh(),
+            GELU(),
             Linear(50, 50),
-            Tanh(),
+            GELU(),
             Linear(50, 50),
-            Tanh(),
+            GELU(),
             Linear(50, 1),
         )
 
