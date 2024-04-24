@@ -39,7 +39,6 @@ from src.opt_algos.surrogate_updates import (
 GAIL_BASE = "GAIL"
 GAIL_TBS  = "TBS"
 from src.opt_algos.surrogate_updates import (
-    TBS_STD,
     TBS_OPTIMISTIC,
 )
 

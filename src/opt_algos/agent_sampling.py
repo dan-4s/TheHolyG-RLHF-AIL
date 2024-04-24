@@ -3,7 +3,8 @@ This file implements trajectory sampling for the agent. Code is taken from
 https://github.com/hcnoh/gail-pytorch/blob/main/models/gail.py,
 and is improved.
 
-TODO: Add feature to save the gifs of trajectories over training runs.
+TODO: Add feature to save the gifs of trajectories at the end of training runs.
+TODO: Add better docstring to the functions.
 """
 
 import gym
@@ -16,6 +17,7 @@ import matplotlib.pyplot as plt
 import matplotlib.animation as animation
 
 
+@torch.no_grad() # disable gradient tracking in this function.
 def stable_reverse_discounting(values: torch.Tensor, discounts: torch.Tensor):
     """
     Apply the discount vector to the values vector to get back the cummulative
@@ -60,6 +62,7 @@ def stable_reverse_discounting(values: torch.Tensor, discounts: torch.Tensor):
     return output
 
 
+@torch.no_grad() # disable gradient tracking in this function.
 def get_episode_returns(
     discriminator: torch.nn.Module,
     episode_obs: torch.Tensor,
@@ -71,33 +74,20 @@ def get_episode_returns(
     discriminator network, along with the episode observations, actions,
     gammas, and lambdas.
     """
-    # Next, compute the return. The return is simply the discounted
-    #   Q-function estimate of the visited state. Since the discriminator
-    #   acts as a Q-function for us, we just take the discriminator output
-    #   and sum over the trajectory length, from each state-action pair:
+    # Compute the return. The return is simply the discounted Q-function
+    # estimate of the visited state. Since the discriminator acts as a
+    # Q-function for us, we just take the discriminator output and sum over the
+    # trajectory length, from each state-action pair:
     #       sum_t(gamma^t * discriminator(s_t, a_t)).
-    # NOTE: episode_costs are negative since we are maximising the expected
-    #       return.
-    # TODO: Potential error in the code here: episode costs should just be the
-    #   discriminator output, not the negative log discriminator output.
-    # episode_costs = (-1) * torch.log(
-    #     discriminator(episode_obs, episode_acts),
-    # ).squeeze().detach()
     episode_costs = discriminator(episode_obs, episode_acts).squeeze().detach()
     
-    # OLD CODE: KEEPING FOR POSTERITY, TODO: REMOVE LATER!
-    # episode_disc_costs = episode_gammas * episode_costs
-    # Do a reverse cumsum to get the return for each state-action pair.
-    # episode_returns = episode_disc_costs - \
-        # episode_disc_costs.cumsum(dim=0) + episode_disc_costs.sum(dim=0)
-    # Scale the returns (gets rid of extra gamma terms)
-    # episode_returns = episode_returns / episode_gammas
     episode_returns = stable_reverse_discounting(
         episode_costs, episode_gammas,
     )
     return episode_returns
 
 
+@torch.no_grad() # disable gradient tracking in this function.
 def get_episode_advantages(
     discriminator: torch.nn.Module,
     value_function: torch.nn.Module,
@@ -113,28 +103,15 @@ def get_episode_advantages(
     value function and discriminator networks, along with the episode
     observations, actions, gammas, and lambdas.
     """
-    # Next, compute the return. The return is simply the discounted
-    #   Q-function estimate of the visited state. Since the discriminator
-    #   acts as a Q-function for us, we just take the discriminator output
-    #   and sum over the trajectory length, from each state-action pair:
-    #       sum_t(gamma^t * discriminator(s_t, a_t)).
-    # NOTE: episode_costs are negative since we are maximising the expected
-    #       return.
-    # TODO: Potential error in the code here: episode costs should just be the
-    #   discriminator output, not the negative log discriminator output.
-    # episode_costs = (-1) * torch.log(
-    #     discriminator(episode_obs, episode_acts),
-    # ).squeeze().detach()
+    # Compute the advantage. The advantage in this instance is going to be the
+    # Q-function subtracted from the value function. In this case, it is
+    # basically:
+    #   discriminator(s,a) - value_function(s) + gamma*value_function(s').
+    #
+    # We can see this as the basic Bellman equation for a Q-function estimate.
+    # This form of the advantage was inherited from the pytorch-gail repo.
     episode_costs = discriminator(episode_obs, episode_acts).squeeze().detach()
     
-    # Next, compute the advantage. The advantage in this instance is going
-    #   to be the Q-function subtracted from the value function. In this
-    #   case, it is basically: discriminator(s,a) - value_function(s). In
-    #   reality, we do:
-    #     discriminator(s,a) - value_function(s) + gamma*value_function(s')
-    #   Again, I don't know why this equation was used, it is inherited
-    #   from the author of the GAIL repo this was based off of.
-    #   Similarly to the returns, we then take the reverse cumsum.
     value_s = value_function(episode_obs).squeeze().detach()
     # Handles single state-action pair corner case.
     if(value_s.dim() == 0):
@@ -144,19 +121,14 @@ def get_episode_advantages(
         dim=0,
     )
     ind_advantages = episode_costs - value_s + gamma*next_value
-    # OLD CODE: KEEPING FOR POSTERITY, TODO: REMOVE LATER!
-    # Discount the individual advantages
-    # ind_advantages = episode_gammas * episode_lambdas * ind_advantages
-    # episode_advantages = ind_advantages - \
-    #     ind_advantages.cumsum(dim=0) + ind_advantages.sum(dim=0)
-    # # Scale the individual advantages to remove extra discounts.
-    # episode_advantages = episode_advantages / (episode_gammas * episode_lambdas)
+    
     episode_advantages = stable_reverse_discounting(
         ind_advantages, episode_lambdas * episode_gammas,
     )
     return episode_advantages
 
 
+@torch.no_grad() # disable gradient tracking in this function.
 def get_advantages(
     discriminator: torch.nn.Module,
     value_function: torch.nn.Module,
@@ -302,4 +274,3 @@ def get_agent_trajectories(
         agent_gammas,
         episodes,
     )
-
