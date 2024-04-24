@@ -60,7 +60,7 @@ def stable_reverse_discounting(values: torch.Tensor, discounts: torch.Tensor):
     return output
 
 
-def get_returns(
+def get_episode_returns(
     discriminator: torch.nn.Module,
     episode_obs: torch.Tensor,
     episode_acts: torch.Tensor,
@@ -98,7 +98,7 @@ def get_returns(
     return episode_returns
 
 
-def get_advantages(
+def get_episode_advantages(
     discriminator: torch.nn.Module,
     value_function: torch.nn.Module,
     episode_obs: torch.Tensor,
@@ -157,17 +157,48 @@ def get_advantages(
     return episode_advantages
 
 
+def get_advantages(
+    discriminator: torch.nn.Module,
+    value_function: torch.nn.Module,
+    episodes: list[tuple[torch.Tensor, torch.Tensor, torch.Tensor, torch.Tensor]],
+    normalize_advantage: bool,
+    gamma: float,
+    device: torch.DeviceObjType,
+):
+    """
+    Helper function to compute advantages of an episode, returning the tensor
+    of concatenated advantages that are normalised according to the input
+    parameter `normalize_advantage`.
+    """
+    all_advantages = []
+    for episode in episodes:
+        episode_obs, episode_acts, episode_gammas, episode_lambdas = episode
+        episode_advantages = get_episode_advantages(
+            discriminator=discriminator,
+            value_function=value_function,
+            episode_obs=episode_obs,
+            episode_acts=episode_acts,
+            episode_gammas=episode_gammas,
+            episode_lambdas=episode_lambdas,
+            gamma=gamma,
+            device=device,
+        )
+        all_advantages.append(episode_advantages)
+    all_advantages = torch.cat(all_advantages, dim=0)
+    if(normalize_advantage):
+        all_advantages = (all_advantages - all_advantages.mean()
+                            ) / all_advantages.std()
+    return all_advantages
+
+
 @torch.no_grad() # disable gradient tracking in this function.
 def get_agent_trajectories(
         env: gym.Env,
         agent_model: torch.nn.Module,
-        value_function: torch.nn.Module,
-        discriminator: torch.nn.Module,
         num_sa_pairs: int,
         horizon: int,
         gamma: float,
         lambd: float,
-        normalize_advantage: bool,
         device: torch.DeviceObjType,
     ) -> tuple[float, torch.Tensor, torch.Tensor, torch.Tensor, torch.Tensor, torch.Tensor]:
     """
@@ -177,16 +208,10 @@ def get_agent_trajectories(
     Parameters:
         env (`gym.Env`): The environment we're using to sample trajectories.
         agent_model (`torch.nn.Module`): The agent model.
-        value_function (`torch.nn.Module`): The value function model (acts as a
-            critic function in actor-critic).
-        discriminator (`torch.nn.Module`): The discriminator model (acts as a
-            Q-function).
         num_sa_pairs (`int`): The number of state-action pairs to sample.
         horizon (`int`): The max number of steps per trajectory.
         gamma (`float`): Discount factor for returns and advantage.
         lambd (`float`): Discount factor for advantage.
-        normalize_advantage (`bool`): Whether to normalise the advantage
-            estimate.
         device (`torch.device`): The device to put all data on.
 
     Returns:
@@ -200,14 +225,10 @@ def get_agent_trajectories(
     #   collecting them for later! So we can disable gradients in this
     #   function.
     agent_model.eval()
-    value_function.eval()
-    discriminator.eval()
 
     # Variables to track trajectory generation.
     agent_obs = []
     agent_actions = []
-    agent_returns = [] # Requires discriminator
-    agent_advantages = [] # Requires the value function and discriminator
     agent_gammas = []
     agent_reward = []
     episodes = []
@@ -262,24 +283,6 @@ def get_agent_trajectories(
         episode_lambdas = torch.tensor(episode_lambdas, device=device).float()
         agent_gammas.append(episode_gammas)
 
-        episode_returns = get_returns(
-            discriminator=discriminator,
-            episode_obs=episode_obs,
-            episode_acts=episode_acts,
-            episode_gammas=episode_gammas,
-        )
-        episode_advantages = get_advantages(
-            discriminator=discriminator,
-            value_function=value_function,
-            episode_obs=episode_obs,
-            episode_acts=episode_acts,
-            episode_gammas=episode_gammas,
-            episode_lambdas=episode_lambdas,
-            gamma=gamma,
-            device=device,
-        )
-        agent_returns.append(episode_returns)
-        agent_advantages.append(episode_advantages)
         episodes.append((
             episode_obs, episode_acts, episode_gammas, episode_lambdas,
         ))
@@ -287,24 +290,15 @@ def get_agent_trajectories(
     # Convert the lists of tensors to tensors
     agent_obs = torch.stack(agent_obs, dim=0)
     agent_actions = torch.stack(agent_actions).to(device)
-    agent_returns = torch.cat(agent_returns, dim=0)
-    agent_advantages = torch.cat(agent_advantages, dim=0)
     agent_gammas = torch.cat(agent_gammas, dim=0)
     
     # Get relevant logging information
     agent_rwd_mean = np.mean(agent_reward).item()
-
-    # Convert data to tensors.
-    if(normalize_advantage):
-        agent_advantages = (agent_advantages - agent_advantages.mean()
-                            ) / agent_advantages.std()
     
     return (
         agent_rwd_mean,
         agent_obs,
         agent_actions,
-        agent_returns,
-        agent_advantages,
         agent_gammas,
         episodes,
     )

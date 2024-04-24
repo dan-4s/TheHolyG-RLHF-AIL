@@ -15,7 +15,10 @@ from omegaconf import DictConfig
 from tqdm import tqdm
 
 from src.opt_algos.expert_sampling import get_expert_trajectories
-from src.opt_algos.agent_sampling import get_agent_trajectories
+from src.opt_algos.agent_sampling import (
+    get_agent_trajectories,
+    get_advantages,
+)
 from src.agent_networks.gail_networks import (
     Discriminator,
     PolicyNetwork,
@@ -96,8 +99,6 @@ def train_GAIL(
     disc_loss_fn = torch.nn.BCEWithLogitsLoss()
     disc_opt_method = cfg.training_hyperparams.disc_opt_method
     disc_tbs_method = cfg.training_hyperparams.disc_tbs_method
-    disc_inner_loops = cfg.training_hyperparams.disc_inner_loops
-    disc_eta = cfg.training_hyperparams.disc_eta
     prev_discriminator = None
     if(disc_opt_method == GAIL_TBS and disc_tbs_method == TBS_OPTIMISTIC):
         prev_discriminator = copy.deepcopy(discriminator)
@@ -107,7 +108,6 @@ def train_GAIL(
     )
 
     value_loss_fn = torch.nn.MSELoss()
-    value_inner_loops = cfg.training_hyperparams.value_inner_loops
     value_optim = torch.optim.AdamW(
         value_function.parameters(),
         lr=cfg.training_hyperparams.lr,
@@ -115,8 +115,6 @@ def train_GAIL(
 
     agent_opt_method = cfg.training_hyperparams.policy_opt_method
     agent_tbs_method = cfg.training_hyperparams.policy_tbs_method
-    agent_inner_loops = cfg.training_hyperparams.policy_inner_loops
-    agent_eta = cfg.training_hyperparams.policy_eta
     prev_agent = None
     if(agent_opt_method == GAIL_TBS and agent_tbs_method == TBS_OPTIMISTIC):
         prev_agent = copy.deepcopy(agent_model)
@@ -128,21 +126,16 @@ def train_GAIL(
         out = get_agent_trajectories(
             env=env,
             agent_model=agent_model,
-            value_function=value_function,
-            discriminator=discriminator,
             num_sa_pairs=cfg.training_hyperparams.num_steps_per_iter,
             horizon=cfg.training_hyperparams.horizon,
             gamma=cfg.training_hyperparams.gae_gamma,
             lambd=cfg.training_hyperparams.gae_lambda,
-            normalize_advantage=cfg.training_hyperparams.normalize_advantage,
             device=device,
         )
         (
             agent_reward_mean,
             agent_obs,
             agent_actions,
-            old_agent_returns,    # OLD estimates, useful for TBS-style training.
-            old_agent_advantages, # OLD estimates, useful for TBS-style training.
             agent_gammas,
             episodes, # Used to generate new return and advantage estimates.
         ) = out
@@ -166,13 +159,11 @@ def train_GAIL(
                 discriminator=discriminator,
                 prev_discriminator=prev_discriminator,
                 disc_optim=disc_optim,
-                num_inner_loops=disc_inner_loops,
-                eta=disc_eta,
                 expert_obs=expert_obs,
                 expert_acts=expert_actions,
                 agent_obs=agent_obs,
                 agent_acts=agent_actions,
-                method=disc_tbs_method,
+                cfg=cfg,
                 importance_sampling=None,
             )
         discriminator.eval()
@@ -203,20 +194,34 @@ def train_GAIL(
         #
         # NOTE: The discriminator has since been updated, we need to recompute
         #   the returns and advantages!
+        old_agent_advantages = get_advantages(
+            discriminator=discriminator,
+            value_function=value_function,
+            episodes=episodes,
+            normalize_advantage=cfg.training_hyperparams.normalize_advantage,
+            gamma=cfg.training_hyperparams.gae_gamma,
+            device=device,
+        ).detach()
         value_function.train()
-        value_loss, old_agent_advantages, new_agent_advantages = value_update(
+        value_loss = value_update(
             discriminator=discriminator,
             value_function=value_function,
             value_optim=value_optim,
             value_loss_fn=value_loss_fn,
-            num_inner_loops=value_inner_loops,
+            num_inner_loops=cfg.training_hyperparams.value_inner_loops,
             episodes=episodes,
-            gamma=cfg.training_hyperparams.gae_gamma,
-            device=device,
         )
         value_function.eval()
+        new_agent_advantages = get_advantages(
+            discriminator=discriminator,
+            value_function=value_function,
+            episodes=episodes,
+            normalize_advantage=cfg.training_hyperparams.normalize_advantage,
+            gamma=cfg.training_hyperparams.gae_gamma,
+            device=device,
+        ).detach()
 
-        # TODO: policy update step
+        # Compute the policy update with either TRPO, TBS or optimistic TBS.
         agent_model.train()
         if(agent_opt_method == GAIL_BASE):
             policy_loss = gail_policy_update(
@@ -233,8 +238,6 @@ def train_GAIL(
             )
         else:
             policy_loss = tbs_policy_update(
-                discriminator=discriminator,
-                value_function=value_function,
                 agent_model=agent_model,
                 prev_agent_model=prev_agent,
                 agent_optim=agent_optim,
@@ -243,9 +246,7 @@ def train_GAIL(
                 agent_gammas=agent_gammas,
                 new_advantages=new_agent_advantages,
                 old_advantages=old_agent_advantages,
-                episodes=episodes,
                 cfg=cfg,
-                device=device,
             )
         agent_model.eval()
 

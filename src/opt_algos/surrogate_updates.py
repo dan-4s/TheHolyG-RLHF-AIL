@@ -8,11 +8,9 @@ from src.agent_networks.gail_networks import (
     Discriminator,
     PolicyNetwork,
     ValueNetwork,
-    Expert,
 )
 from src.opt_algos.agent_sampling import (
-    get_returns,
-    get_advantages,
+    get_episode_returns,
 )
 from src.opt_algos.gail_updates import (
     KLDivergence,
@@ -69,13 +67,11 @@ def tbs_discriminator_update(
     discriminator: Discriminator,
     prev_discriminator: Discriminator,
     disc_optim: torch.optim.Optimizer,
-    num_inner_loops: int,
-    eta: float,
     expert_obs: torch.Tensor,
     expert_acts: torch.Tensor,
     agent_obs: torch.Tensor,
     agent_acts: torch.Tensor,
-    method: str = "standard",
+    cfg: DictConfig,
     importance_sampling: torch.Tensor = None,
 ) -> torch.Tensor:
     """
@@ -96,6 +92,9 @@ def tbs_discriminator_update(
     (new) previous discriminator.
     """
     # TODO: Add importance sampling
+    method = cfg.training_hyperparams.disc_tbs_method
+    num_inner_loops = cfg.training_hyperparams.disc_inner_loops
+    eta = cfg.training_hyperparams.disc_eta
     # Compute the relevant gradient terms and the D_t() terms.
     with torch.no_grad():
         # Get the current predictions.
@@ -168,8 +167,6 @@ def value_update(
     value_loss_fn,
     num_inner_loops: int,
     episodes: list[tuple[torch.Tensor, torch.Tensor, torch.Tensor, torch.Tensor]],
-    gamma: float,
-    device: torch.DeviceObjType,
 ):
     """
     Compute the value update a number of times using the discriminator to
@@ -177,88 +174,57 @@ def value_update(
 
     TODO: ADD TBS as an option here!
     """
-    old_advantage = None
     for _ in range(num_inner_loops):
-        # all_returns = []
-        all_advantages = []
+        all_returns = []
         all_obs = []
         value_optim.zero_grad()
         # For each episode, compute the return.
         for episode in episodes:
-            episode_obs, episode_acts, episode_gammas, episode_lambdas = episode
+            episode_obs, episode_acts, episode_gammas, _ = episode
             with torch.no_grad():
-                # episode_returns = get_returns(
-                #     discriminator=discriminator,
-                #     episode_obs=episode_obs,
-                #     episode_acts=episode_acts,
-                #     episode_gammas=episode_gammas,
-                # )
-                episode_advantages = get_advantages(
+                episode_returns = get_episode_returns(
                     discriminator=discriminator,
-                    value_function=value_function,
                     episode_obs=episode_obs,
                     episode_acts=episode_acts,
                     episode_gammas=episode_gammas,
-                    episode_lambdas=episode_lambdas,
-                    gamma=gamma,
-                    device=device,
                 )
-            # all_returns.append(episode_returns)
-            all_advantages.append(episode_advantages)
+            all_returns.append(episode_returns)
             all_obs.append(episode_obs)
         
         all_obs = torch.cat(all_obs, dim=0)
-        # all_returns = torch.cat(all_returns, dim=0)
-        all_advantages = torch.cat(all_advantages, dim=0)
-        if(old_advantage is None):
-            old_advantage = all_advantages
-        value_s = value_function(all_obs).squeeze()
-        all_advantages = value_s.detach() + all_advantages
+        all_returns = torch.cat(all_returns, dim=0)
         total_loss = value_loss_fn(
-            value_s,
-            all_advantages,
+            value_function(all_obs).squeeze(),
+            all_returns,
         )
         # TODO: Is gradient clipping actually necessary?
-        total_loss.backward(retain_graph=False)
-        torch.nn.utils.clip_grad_norm(value_function.parameters(), 10.0)
-        # total_loss.backward()
+        # total_loss.backward(retain_graph=False)
+        # torch.nn.utils.clip_grad_norm(value_function.parameters(), 10.0)
+        total_loss.backward()
         value_optim.step()
     
     # Finally, compute the loss so we can log it.
-    value_function.eval()
-    all_advantages = []
+    all_returns = []
     all_obs = []
     with torch.no_grad():
         for episode in episodes:
-            episode_obs, episode_acts, episode_gammas, episode_lambdas = episode
+            episode_obs, episode_acts, episode_gammas, _ = episode
             with torch.no_grad():
-                # episode_returns = get_returns(
-                #     discriminator=discriminator,
-                #     episode_obs=episode_obs,
-                #     episode_acts=episode_acts,
-                #     episode_gammas=episode_gammas,
-                # )
-                episode_returns = get_advantages(
+                episode_returns = get_episode_returns(
                     discriminator=discriminator,
-                    value_function=value_function,
                     episode_obs=episode_obs,
                     episode_acts=episode_acts,
                     episode_gammas=episode_gammas,
-                    episode_lambdas=episode_lambdas,
-                    gamma=gamma,
-                    device=device,
                 )
-            all_advantages.append(episode_returns)
+            all_returns.append(episode_returns)
             all_obs.append(episode_obs)
         all_obs = torch.cat(all_obs, dim=0)
-        all_advantages = torch.cat(all_advantages, dim=0)
-        value_s = value_function(all_obs).squeeze()
+        all_returns = torch.cat(all_returns, dim=0)
         total_loss = value_loss_fn(
-            value_s,
-            all_advantages + value_s,
+            value_function(all_obs).squeeze(),
+            all_returns,
         )
-    new_advantage = all_advantages
-    return total_loss, old_advantage, new_advantage
+    return total_loss
 
 
 def __compute_policy_surrogate_loss(
@@ -303,8 +269,6 @@ def __compute_policy_surrogate_loss(
 
 
 def tbs_policy_update(
-    discriminator: Discriminator,
-    value_function: ValueNetwork,
     agent_model: PolicyNetwork,
     prev_agent_model: PolicyNetwork,
     agent_optim: torch.optim.Optimizer,
@@ -313,9 +277,7 @@ def tbs_policy_update(
     agent_gammas: torch.Tensor,
     new_advantages: torch.Tensor,
     old_advantages: torch.Tensor,
-    episodes: list[tuple[torch.Tensor, torch.Tensor, torch.Tensor, torch.Tensor]],
     cfg: DictConfig,
-    device: torch.DeviceObjType,
 ):
     """
     Update the agent's policy function using target-based surrogates. The
@@ -348,24 +310,15 @@ def tbs_policy_update(
     eta = cfg.training_hyperparams.policy_eta
     method = cfg.training_hyperparams.policy_tbs_method
     ce_lambda = cfg.training_hyperparams.ce_lambda
-    gamma = cfg.training_hyperparams.gae_gamma
-    normalize_advantage = cfg.training_hyperparams.normalize_advantage
 
     # Compute the relevant gradient terms and the pi_t terms.
     with torch.no_grad():
-        # First, get the up-to-date advantage estimate.
-        if(normalize_advantage):
-            advantages = (new_advantages - new_advantages.mean()) / new_advantages.std()
-            old_advantages = (old_advantages - old_advantages.mean()) / old_advantages.std()
-        else:
-            advantages = new_advantages
-
         # Get the current (step t) predictions and gradients w.r.t. pi.
         # TODO: Update gradient here to be the empirical causal entropy -> (agent_gammas / pi)
         distribution_t = agent_model(agent_obs)
         log_pi_t = distribution_t.log_prob(agent_acts)
         pi_t = log_pi_t.exp()
-        grad_J_t = advantages / pi_t + ce_lambda*(log_pi_t + 1)
+        grad_J_t = new_advantages / pi_t + ce_lambda*(log_pi_t + 1)
 
         # Get the previous predictions and grads (only for optimistic updates).
         distribution_t_1 = None
@@ -416,7 +369,7 @@ def tbs_policy_update(
     # Updates are done, compute and return the GAIL TRPO loss.
     with torch.no_grad():
         trpo_loss_fn = TRPOLoss(
-            advantage=advantages,
+            advantage=new_advantages,
             agent_acts=agent_acts,
             agent_obs=agent_obs,
             agent_model=agent_model,
