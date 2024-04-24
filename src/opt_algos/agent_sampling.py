@@ -78,9 +78,12 @@ def get_returns(
     #       sum_t(gamma^t * discriminator(s_t, a_t)).
     # NOTE: episode_costs are negative since we are maximising the expected
     #       return.
-    episode_costs = (-1) * torch.log(
-        discriminator(episode_obs, episode_acts),
-    ).squeeze().detach()
+    # TODO: Potential error in the code here: episode costs should just be the
+    #   discriminator output, not the negative log discriminator output.
+    # episode_costs = (-1) * torch.log(
+    #     discriminator(episode_obs, episode_acts),
+    # ).squeeze().detach()
+    episode_costs = discriminator(episode_obs, episode_acts).squeeze().detach()
     
     # OLD CODE: KEEPING FOR POSTERITY, TODO: REMOVE LATER!
     # episode_disc_costs = episode_gammas * episode_costs
@@ -117,9 +120,12 @@ def get_advantages(
     #       sum_t(gamma^t * discriminator(s_t, a_t)).
     # NOTE: episode_costs are negative since we are maximising the expected
     #       return.
-    episode_costs = (-1) * torch.log(
-        discriminator(episode_obs, episode_acts),
-    ).squeeze().detach()
+    # TODO: Potential error in the code here: episode costs should just be the
+    #   discriminator output, not the negative log discriminator output.
+    # episode_costs = (-1) * torch.log(
+    #     discriminator(episode_obs, episode_acts),
+    # ).squeeze().detach()
+    episode_costs = discriminator(episode_obs, episode_acts).squeeze().detach()
     
     # Next, compute the advantage. The advantage in this instance is going
     #   to be the Q-function subtracted from the value function. In this

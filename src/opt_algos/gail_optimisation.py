@@ -202,8 +202,9 @@ def train_GAIL(
         # this may not be the best for convergence.
         #
         # NOTE: The discriminator has since been updated, we need to recompute
-        #   the returns!
+        #   the returns and advantages!
         value_function.train()
+        # value_loss, old_agent_advantages = value_update(
         value_loss = value_update(
             discriminator=discriminator,
             value_function=value_function,
@@ -211,6 +212,8 @@ def train_GAIL(
             value_loss_fn=value_loss_fn,
             num_inner_loops=value_inner_loops,
             episodes=episodes,
+            gamma=cfg.training_hyperparams.gae_gamma,
+            device=device,
         )
         value_function.eval()
 
@@ -239,6 +242,7 @@ def train_GAIL(
                 agent_obs=agent_obs,
                 agent_acts=agent_actions,
                 agent_gammas=agent_gammas,
+                old_advantages=old_agent_advantages, # TODO: These may be too old!
                 episodes=episodes,
                 cfg=cfg,
                 device=device,

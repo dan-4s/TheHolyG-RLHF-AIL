@@ -14,8 +14,10 @@ from src.opt_algos.agent_sampling import (
     get_returns,
     get_advantages,
 )
-from src.opt_algos.gail_updates import TRPOLoss
-
+from src.opt_algos.gail_updates import (
+    KLDivergence,
+    TRPOLoss,
+)
 
 # Constants
 TBS_OPTIMISTIC = "optimistic"
@@ -52,15 +54,14 @@ def __compute_disc_surrogate_loss(
         expert_inner = grad_D_t_expert.T @ D_diff_expert
         agent_inner = grad_D_t_agent.T @ D_diff_agent
     elif(method == TBS_OPTIMISTIC):
-        expert_inner = (2*grad_D_t_expert - grad_D_t_1_expert).T @ D_diff_expert
-        agent_inner = (2*grad_D_t_agent - grad_D_t_1_agent).T @ D_diff_agent
+        expert_inner = (2*grad_D_t_expert - grad_D_t_1_expert).mT @ D_diff_expert
+        agent_inner = (2*grad_D_t_agent - grad_D_t_1_agent).mT @ D_diff_agent
     
     # Since we're maximising on the discriminator, negate the surrogate.
-    # Potential BUG: Surrogate should be negated, but sometimes works better when it isn't... 
     expert_surrogate = -expert_inner + (1/(2*eta)) * D_diff_expert.norm().pow(2)
     agent_surrogate = -agent_inner + (1/(2*eta)) * D_diff_agent.norm().pow(2)
 
-    surrogate_loss = torch.mean(expert_surrogate + agent_surrogate)
+    surrogate_loss = torch.cat((expert_surrogate, agent_surrogate)).mean()
     return surrogate_loss
 
 
@@ -167,6 +168,8 @@ def value_update(
     value_loss_fn,
     num_inner_loops: int,
     episodes: list[tuple[torch.Tensor, torch.Tensor, torch.Tensor, torch.Tensor]],
+    gamma: float,
+    device: torch.DeviceObjType,
 ):
     """
     Compute the value update a number of times using the discriminator to
@@ -174,13 +177,15 @@ def value_update(
 
     TODO: ADD TBS as an option here!
     """
+    # old_advantage = None
     for _ in range(num_inner_loops):
         all_returns = []
+        # all_advantages = []
         all_obs = []
         value_optim.zero_grad()
         # For each episode, compute the return.
         for episode in episodes:
-            episode_obs, episode_acts, episode_gammas, _ = episode
+            episode_obs, episode_acts, episode_gammas, episode_lambdas = episode
             with torch.no_grad():
                 episode_returns = get_returns(
                     discriminator=discriminator,
@@ -188,15 +193,31 @@ def value_update(
                     episode_acts=episode_acts,
                     episode_gammas=episode_gammas,
                 )
+                # if(old_advantage is None):
+                #     episode_advantages = get_advantages(
+                #         discriminator=discriminator,
+                #         value_function=value_function,
+                #         episode_obs=episode_obs,
+                #         episode_acts=episode_acts,
+                #         episode_gammas=episode_gammas,
+                #         episode_lambdas=episode_lambdas,
+                #         gamma=gamma,
+                #         device=device,
+                #     )
             all_returns.append(episode_returns)
+            # all_advantages.append(episode_advantages)
             all_obs.append(episode_obs)
         
         all_obs = torch.cat(all_obs, dim=0)
         all_returns = torch.cat(all_returns, dim=0)
+        # old_advantage = torch.cat(all_advantages, dim=0)
         total_loss = value_loss_fn(
             value_function(all_obs).squeeze(),
             all_returns,
         )
+        # TODO: Is gradient clipping actually necessary?
+        # total_loss.backward(retain_graph=False)
+        # torch.nn.utils.clip_grad_norm(value_function.parameters(), 10.0)
         total_loss.backward()
         value_optim.step()
     
@@ -222,7 +243,7 @@ def value_update(
             value_function(all_obs).squeeze(),
             all_returns,
         )
-    return total_loss
+    return total_loss #, old_advantage
 
 
 def __compute_policy_surrogate_loss(
@@ -233,6 +254,11 @@ def __compute_policy_surrogate_loss(
     pi_t: torch.Tensor,
     grad_J_t: torch.Tensor,
     grad_J_t_1: torch.Tensor,
+    old_mean: torch.Tensor,
+    old_cov: torch.Tensor,
+    old_probs: torch.Tensor,
+    action_dim: int,
+    cfg: DictConfig,
     method: str = TBS_STD,
 ) -> torch.Tensor:
     """
@@ -247,11 +273,16 @@ def __compute_policy_surrogate_loss(
         inner = grad_J_t.T @ pi_diff
     elif(method == TBS_OPTIMISTIC):
         inner = (2*grad_J_t - grad_J_t_1).T @ pi_diff
-    # TODO: Testing the torch kl_div function rather than defining a custom one
-    #   based on the parameters of the distribution.
-    kl_divergence = torch.nn.functional.kl_div(
-        input=log_pi_current, target=pi_t)
-    surrogate = -inner + (1 / eta) * kl_divergence
+    kl_divergence = KLDivergence(
+        agent_obs=agent_obs,
+        agent_model=agent_model,
+        old_mean=old_mean,
+        old_cov=old_cov,
+        old_probs=old_probs,
+        action_dim=action_dim,
+        is_discrete=cfg.env.discrete,
+    )
+    surrogate = -inner + (1 / eta) * kl_divergence()
     surrogate_loss = surrogate.mean()
     return surrogate_loss
 
@@ -265,6 +296,7 @@ def tbs_policy_update(
     agent_obs: torch.Tensor,
     agent_acts: torch.Tensor,
     agent_gammas: torch.Tensor,
+    old_advantages: torch.Tensor,
     episodes: list[tuple[torch.Tensor, torch.Tensor, torch.Tensor, torch.Tensor]],
     cfg: DictConfig,
     device: torch.DeviceObjType,
@@ -302,7 +334,7 @@ def tbs_policy_update(
     ce_lambda = cfg.training_hyperparams.ce_lambda
     gamma = cfg.training_hyperparams.gae_gamma
 
-    # Compute the relevant gradient terms and the D_t() terms.
+    # Compute the relevant gradient terms and the pi_t terms.
     with torch.no_grad():
         # First, generate the up-to-date advantage estimate.
         curr_advantages = []
@@ -323,6 +355,7 @@ def tbs_policy_update(
         advantages = torch.cat(curr_advantages, dim=0)
 
         # Get the current (step t) predictions and gradients w.r.t. pi.
+        # TODO: Update gradient here to be the empirical causal entropy -> (agent_gammas / pi)
         distribution_t = agent_model(agent_obs)
         log_pi_t = distribution_t.log_prob(agent_acts)
         pi_t = log_pi_t.exp()
@@ -337,13 +370,23 @@ def tbs_policy_update(
             distribution_t_1 = prev_agent_model(agent_obs)
             log_pi_t_1  = distribution_t_1.log_prob(agent_acts)
             pi_t_1 = log_pi_t_1.exp()
-            grad_J_t_1  = advantages / pi_t_1 + ce_lambda*(log_pi_t_1 + 1)
+            # TODO: advantages here should be made with the current discriminator but previous value function!!!
+            grad_J_t_1  = old_advantages / pi_t_1 + ce_lambda*(log_pi_t_1 + 1)
     
-    # Done with the previous discriminator, can replace it with a new copy.
+    # Done with the previous agent, can replace it with a new copy.
     # NOTE: This will not pass by reference! A new copy of the params is made!
     if(prev_agent_model is not None):
         prev_agent_model.load_state_dict(agent_model.state_dict())
 
+    # Get variables for the kl divergence.
+    old_distribution = agent_model(agent_obs)
+    old_mean = old_distribution.mean.detach()
+    if(not cfg.env.discrete):
+        old_cov_mat = old_distribution.covariance_matrix.sum(-1).detach()
+        old_probs = None
+    else:
+        old_cov_mat = None
+        old_probs = old_distribution.probs.detach()
     for _ in range(num_inner_loops):
         agent_optim.zero_grad()
         loss = __compute_policy_surrogate_loss(
@@ -354,13 +397,17 @@ def tbs_policy_update(
             pi_t=pi_t,
             grad_J_t=grad_J_t,
             grad_J_t_1=grad_J_t_1,
+            old_mean=old_mean,
+            old_cov=old_cov_mat,
+            old_probs=old_probs,
+            action_dim=agent_model.action_dim,
+            cfg=cfg,
             method=method,
         )
         loss.backward()
         agent_optim.step()
     
     # Updates are done, compute and return the GAIL TRPO loss.
-    # TODO: Check the sign of causal entropy, it may not be correct!
     with torch.no_grad():
         trpo_loss_fn = TRPOLoss(
             advantage=advantages,
@@ -370,7 +417,7 @@ def tbs_policy_update(
             old_log_prob_acts=log_pi_t,
         )
         causal_entropy = ce_lambda *  torch.mean(
-            (-1) * agent_gammas *\
+            agent_gammas * \
             agent_model(agent_obs).log_prob(agent_acts)
         )
         trpo_loss = trpo_loss_fn() + causal_entropy
