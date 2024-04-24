@@ -28,6 +28,7 @@ training_hyperparams:
     disc_eta: 3e-1
     # The following are value hyperparams
     value_inner_loops: 20
+    value_grad_max_norm: 10.0
     # The following are agent's policy hyperparameters
     policy_opt_method: "TBS" # Use GAIL or TBS
     policy_tbs_method: "optimistic" # use optimistic or standard

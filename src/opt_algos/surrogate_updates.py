@@ -166,6 +166,7 @@ def value_update(
     value_optim: torch.optim.Optimizer,
     value_loss_fn,
     num_inner_loops: int,
+    value_grad_max_norm: float,
     episodes: list[tuple[torch.Tensor, torch.Tensor, torch.Tensor, torch.Tensor]],
 ):
     """
@@ -197,10 +198,9 @@ def value_update(
             value_function(all_obs).squeeze(),
             all_returns,
         )
-        # TODO: Is gradient clipping actually necessary?
-        # total_loss.backward(retain_graph=False)
-        # torch.nn.utils.clip_grad_norm(value_function.parameters(), 10.0)
-        total_loss.backward()
+        total_loss.backward(retain_graph=False)
+        torch.nn.utils.clip_grad_norm_(
+            value_function.parameters(), value_grad_max_norm)
         value_optim.step()
     
     # Finally, compute the loss so we can log it.

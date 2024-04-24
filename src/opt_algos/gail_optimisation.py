@@ -208,6 +208,7 @@ def train_GAIL(
             value_optim=value_optim,
             value_loss_fn=value_loss_fn,
             num_inner_loops=cfg.training_hyperparams.value_inner_loops,
+            value_grad_max_norm=cfg.training_hyperparams.value_grad_max_norm,
             episodes=episodes,
         )
         value_function.eval()
