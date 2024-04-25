@@ -22,7 +22,7 @@ training_hyperparams:
     cg_damping: 0.1
     normalize_advantage: True
     # The following are discriminator hyperparams.
-    disc_opt_method: "GAIL" # Use GAIL or TBS
+    disc_opt_method: "TBS" # Use GAIL or TBS
     disc_tbs_method: "standard" # use optimistic or standard
     disc_inner_loops: 20
     disc_eta: 3e-1
@@ -30,7 +30,7 @@ training_hyperparams:
     value_inner_loops: 20
     value_grad_max_norm: 10.0
     # The following are agent's policy hyperparameters
-    policy_opt_method: "GAIL" # Use GAIL or TBS
+    policy_opt_method: "TBS" # Use GAIL or TBS
     policy_tbs_method: "standard" # use optimistic or standard
     policy_inner_loops: 20
     policy_eta: 3e-1

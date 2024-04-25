@@ -296,21 +296,14 @@ def gail_policy_update(
     #   the advantage, this is just what the pytorch-gail implementation did.
     #   Without advantage, we don't need a value function! Can just get the Q-
     #   function directly from the discriminator output!
-    episode_advantages = []
-    for episode in episodes:
-        episode_obs, episode_acts, episode_gammas, episode_lambdas = episode
-        _advantages = get_advantages(
-            discriminator=discriminator,
-            value_function=value_function,
-            episode_obs=episode_obs,
-            episode_acts=episode_acts,
-            episode_gammas=episode_gammas,
-            episode_lambdas=episode_lambdas,
-            gamma=cfg.training_hyperparams.gae_gamma,
-            device=device,
-        )
-        episode_advantages.append(_advantages)
-    agent_advantages = torch.cat(episode_advantages, dim=0)
+    agent_advantages = get_advantages(
+        discriminator=discriminator,
+        value_function=value_function,
+        episodes=episodes,
+        normalize_advantage=cfg.training_hyperparams.normalize_advantage,
+        gamma=cfg.training_hyperparams.gae_gamma,
+        device=device,
+    )
     
     # Set up the TRPO loss and KL Divergence.
     trpo_loss_fn = TRPOLoss(

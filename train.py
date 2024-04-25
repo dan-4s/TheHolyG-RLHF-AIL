@@ -7,6 +7,7 @@ import hydra
 import os
 import torch
 import wandb
+from matplotlib.pyplot import set_loglevel
 from omegaconf import DictConfig
 from src.opt_algos.toy_game_optimisation import train_NG, train_target_based_surrogate
 from src.opt_algos.gail_optimisation import train_GAIL
@@ -20,6 +21,9 @@ def main(cfg: DictConfig) -> None:
     :param cfg: DictConfig configuration composed by Hydra.
     :return: None
     """
+    # Turn off matplotlib logging.
+    set_loglevel("critical")
+
     checkpoints_dir = "checkpoints"
 
     wandb_run_name = cfg.wandb.run_name
@@ -90,6 +94,7 @@ def main(cfg: DictConfig) -> None:
             cfg=cfg,
             device=device,
             experts_path=experts_path,
+            models_path=model_save_dir,
         )
 
         # Get rid of the environment, don't need it anymore.

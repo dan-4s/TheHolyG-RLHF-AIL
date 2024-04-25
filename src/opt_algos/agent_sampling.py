@@ -172,6 +172,9 @@ def get_agent_trajectories(
         gamma: float,
         lambd: float,
         device: torch.DeviceObjType,
+        render_gif: bool = False,
+        gif_path: str = None,
+        num_iters: int = None,
     ) -> tuple[float, torch.Tensor, torch.Tensor, torch.Tensor, torch.Tensor, torch.Tensor]:
     """
     This function queries the agent that is being trained to generate
@@ -185,6 +188,9 @@ def get_agent_trajectories(
         gamma (`float`): Discount factor for returns and advantage.
         lambd (`float`): Discount factor for advantage.
         device (`torch.device`): The device to put all data on.
+        render_gif (`bool`): Whether to output a gif of the expert actions.
+        gif_path (`str`): Where to save the gif.
+        num_iters (`int`): The iteration number.
 
     Returns:
         `tuple[float, torch.Tensor, ...]`: tuple with agent reward mean and the
@@ -199,6 +205,7 @@ def get_agent_trajectories(
     agent_model.eval()
 
     # Variables to track trajectory generation.
+    num_gen_traj = 0
     agent_obs = []
     agent_actions = []
     agent_gammas = []
@@ -208,6 +215,9 @@ def get_agent_trajectories(
         # Run trajectories until we have a sufficient amount of data.
         obs, _ = env.reset()
         episode_done = False
+        gif_frames = []
+        if(render_gif and num_gen_traj == 0):
+            gif_frames.append(env.render())
 
         # Episode-based data structures
         episode_obs = []
@@ -235,6 +245,9 @@ def get_agent_trajectories(
 
             obs, reward, episode_done, _, _ = env.step(agent_action)
             episode_reward += reward
+
+            if(render_gif and num_gen_traj == 0):
+                gif_frames.append(env.render())
             
             if((horizon is not None and 
                 num_steps >= horizon) or
@@ -258,6 +271,35 @@ def get_agent_trajectories(
         episodes.append((
             episode_obs, episode_acts, episode_gammas, episode_lambdas,
         ))
+
+        if(render_gif and num_gen_traj == 0):
+            # Create the figure and axes objects
+            fig, ax = plt.subplots()
+            # Set the initial image
+            im = ax.imshow(gif_frames[0], animated=True)
+            def update(i):
+                im.set_array(gif_frames[i])
+                return im,
+            # Create the animation object
+            animation_fig = animation.FuncAnimation(
+                fig,
+                update,
+                frames=len(gif_frames),
+                interval=40,
+                blit=True,
+                repeat_delay=10
+            )
+            # Show the animation
+            plt.show()
+            plt.title(
+                f"Agent Trajectory at Iteration {num_iters}")
+            animation_fig.save(
+                os.path.join(
+                    gif_path, 
+                    f"trajectory_at_iter_{num_iters}.gif",
+                )
+            )
+        num_gen_traj += 1
     
     # Convert the lists of tensors to tensors
     agent_obs = torch.stack(agent_obs, dim=0)

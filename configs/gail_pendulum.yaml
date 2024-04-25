@@ -21,6 +21,22 @@ training_hyperparams:
     max_kl: 0.01
     cg_damping: 0.1
     normalize_advantage: True
+    # The following are discriminator hyperparams.
+    disc_opt_method: "GAIL" # Use GAIL or TBS
+    disc_tbs_method: "standard" # use optimistic or standard
+    disc_inner_loops: 20
+    disc_eta: 3e-1
+    # The following are value hyperparams
+    value_inner_loops: 20
+    value_grad_max_norm: 10.0
+    # The following are agent's policy hyperparameters
+    policy_opt_method: "GAIL" # Use GAIL or TBS
+    policy_tbs_method: "standard" # use optimistic or standard
+    policy_inner_loops: 20
+    policy_eta: 3e-1
+    # GIF rendering
+    render_gif: False
+    render_schedule: 3 # Every num_iters/schedule, render a gif.
 
 algo:
     toy: False
@@ -40,8 +56,8 @@ discriminator_net:
 
 # Wandb settings
 wandb:
-    project: HCC_NG_vs_TBS
+    project: GAIL_pendulum
     job_type: pendulum
-    tags: [NG_vs_TBS]
+    tags: [HCC_Project]
     mode: online # Whether to use wandb [disabled, online]
     run_name: null

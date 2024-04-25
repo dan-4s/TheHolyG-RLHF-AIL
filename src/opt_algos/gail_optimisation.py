@@ -52,6 +52,7 @@ def train_GAIL(
         cfg: DictConfig,
         device: torch.DeviceObjType,
         experts_path: str = None,
+        models_path: str = None,
     ) -> None:
     """
     Training function for generative adversarial imitation learning (GAIL).
@@ -121,7 +122,12 @@ def train_GAIL(
         agent_model.parameters(),
         lr=cfg.training_hyperparams.lr,
     )
+    render_schedule = int(num_iters / cfg.training_hyperparams.render_schedule)
     for step in (pbar := tqdm(range(num_iters), unit="Step")):
+        render_gif = cfg.training_hyperparams.render_gif and (
+            step == 0 or step == num_iters - 1 or
+            (step+1) % render_schedule == 0
+        )
         out = get_agent_trajectories(
             env=env,
             agent_model=agent_model,
@@ -130,6 +136,9 @@ def train_GAIL(
             gamma=cfg.training_hyperparams.gae_gamma,
             lambd=cfg.training_hyperparams.gae_lambda,
             device=device,
+            render_gif=render_gif,
+            gif_path=models_path,
+            num_iters=step+1,
         )
         (
             agent_reward_mean,

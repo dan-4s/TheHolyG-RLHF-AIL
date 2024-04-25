@@ -1,17 +1,17 @@
 env:
-    _target_: "BipedalWalker-v3"
+    _target_: "Pendulum-v1"
     gym: True
     discrete: False # Discrete action space
 
 expert_hyperparams:
-    num_iters: 1000
-    num_steps_per_iter: 5000
+    num_iters: 500
+    num_steps_per_iter: 2000
     horizon: null
     render_gif: False
 
 training_hyperparams:
-    num_iters: 1000
-    num_steps_per_iter: 5000
+    num_iters: 500
+    num_steps_per_iter: 2000
     horizon: null
     lr: 1e-3
     ce_lambda: 1e-3
@@ -22,7 +22,7 @@ training_hyperparams:
     cg_damping: 0.1
     normalize_advantage: True
     # The following are discriminator hyperparams.
-    disc_opt_method: "GAIL" # Use GAIL or TBS
+    disc_opt_method: "TBS" # Use GAIL or TBS
     disc_tbs_method: "standard" # use optimistic or standard
     disc_inner_loops: 20
     disc_eta: 3e-1
@@ -30,7 +30,7 @@ training_hyperparams:
     value_inner_loops: 20
     value_grad_max_norm: 10.0
     # The following are agent's policy hyperparameters
-    policy_opt_method: "GAIL" # Use GAIL or TBS
+    policy_opt_method: "TBS" # Use GAIL or TBS
     policy_tbs_method: "standard" # use optimistic or standard
     policy_inner_loops: 20
     policy_eta: 3e-1
@@ -56,8 +56,8 @@ discriminator_net:
 
 # Wandb settings
 wandb:
-    project: GAIL_bipedal
-    job_type: bipedal
+    project: GAIL_pendulum
+    job_type: pendulum
     tags: [HCC_Project]
     mode: online # Whether to use wandb [disabled, online]
     run_name: null

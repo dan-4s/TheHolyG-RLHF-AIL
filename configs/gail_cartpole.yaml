@@ -14,7 +14,7 @@ training_hyperparams:
     num_steps_per_iter: 2000
     horizon: null
     lr: 1e-3
-    ce_lambda: 1e-3
+    ce_lambda: 1e-2
     gae_gamma: 0.99
     gae_lambda: 0.99
     epsilon: 0.01
@@ -24,15 +24,19 @@ training_hyperparams:
     # The following are discriminator hyperparams.
     disc_opt_method: "GAIL" # Use GAIL or TBS
     disc_tbs_method: "standard" # use optimistic or standard
-    disc_inner_loops: 10
+    disc_inner_loops: 20
     disc_eta: 3e-1
     # The following are value hyperparams
-    value_inner_loops: 1
+    value_inner_loops: 20
+    value_grad_max_norm: 10.0
     # The following are agent's policy hyperparameters
     policy_opt_method: "GAIL" # Use GAIL or TBS
     policy_tbs_method: "standard" # use optimistic or standard
-    policy_inner_loops: 10
+    policy_inner_loops: 20
     policy_eta: 3e-1
+    # GIF rendering
+    render_gif: False
+    render_schedule: 3 # Every num_iters/schedule, render a gif.
 
 algo:
     toy: False
