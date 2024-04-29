@@ -303,7 +303,6 @@ def gail_policy_update(
         normalize_advantage=cfg.training_hyperparams.normalize_advantage,
         gamma=cfg.training_hyperparams.gae_gamma,
         device=device,
-        gail=True,
     )
     
     # Set up the TRPO loss and KL Divergence.
