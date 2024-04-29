@@ -79,7 +79,9 @@ def get_episode_returns(
     # Q-function for us, we just take the discriminator output and sum over the
     # trajectory length, from each state-action pair:
     #       sum_t(gamma^t * discriminator(s_t, a_t)).
-    episode_costs = discriminator(episode_obs, episode_acts).squeeze().detach()
+    episode_costs = torch.log(
+        discriminator(episode_obs, episode_acts).squeeze().detach()
+    )
     
     episode_returns = stable_reverse_discounting(
         episode_costs, episode_gammas,
@@ -97,11 +99,14 @@ def get_episode_advantages(
     episode_lambdas: torch.Tensor,
     gamma: float,
     device: torch.DeviceObjType,
+    gail: bool = False,
 ):
     """
     Helper function to compute the agent advantages given some
     value function and discriminator networks, along with the episode
     observations, actions, gammas, and lambdas.
+
+    If running GAIL, specify `gail = True`. This will negate the costs.
     """
     # Compute the advantage. The advantage in this instance is going to be the
     # Q-function subtracted from the value function. In this case, it is
@@ -110,8 +115,11 @@ def get_episode_advantages(
     #
     # We can see this as the basic Bellman equation for a Q-function estimate.
     # This form of the advantage was inherited from the pytorch-gail repo.
-    episode_costs = discriminator(episode_obs, episode_acts).squeeze().detach()
-    
+    coef = -1 if(gail) else 1
+    episode_costs = coef * torch.log(
+        discriminator(episode_obs, episode_acts).squeeze().detach()
+    )
+
     value_s = value_function(episode_obs).squeeze().detach()
     # Handles single state-action pair corner case.
     if(value_s.dim() == 0):
@@ -136,11 +144,15 @@ def get_advantages(
     normalize_advantage: bool,
     gamma: float,
     device: torch.DeviceObjType,
+    gail: bool = False,
 ):
     """
     Helper function to compute advantages of an episode, returning the tensor
     of concatenated advantages that are normalised according to the input
     parameter `normalize_advantage`.
+
+    If running GAIL, specify the argument `gail` so that the costs can be
+    negated.
     """
     all_advantages = []
     for episode in episodes:
@@ -154,6 +166,7 @@ def get_advantages(
             episode_lambdas=episode_lambdas,
             gamma=gamma,
             device=device,
+            gail=gail,
         )
         all_advantages.append(episode_advantages)
     all_advantages = torch.cat(all_advantages, dim=0)
