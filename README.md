@@ -1,5 +1,5 @@
 # TheHolyG(RLHF)AIL
-Project with Zichu on connections between generative adversarial imitation learning (GAIL) and reinforcement learning from human feedback (RLHF). We want to show how to link the two methods into an encompassing framework and how to design better optimization techniques for this framework. We utilize concepts of hidden convex-concave games.
+Project with Zichu on connections between generative adversarial imitation learning (GAIL) and reinforcement learning from human feedback (RLHF). We want to show how to link the two methods into an encompassing framework and how to design better optimization techniques for this framework. We utilize concepts of hidden convex-concave games. We have not yet touched RLHF.
 
 ## How to run the code
 We use hydra to manage configurations and WandB to display our metrics during training. These can both be modified in the command-line call of a training run. The following are the two basic methods that we have implemented for the rock-paper-scissors toy problem.
